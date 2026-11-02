@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("sbpDesktop", {
   version: () => ipcRenderer.invoke("app:version"),
   summary: () => ipcRenderer.invoke("db:summary"),
   backup: () => ipcRenderer.invoke("db:backup"),
+  automaticBackup: () => ipcRenderer.invoke("db:auto-backup"),
   listAccounts: (keyword) => ipcRenderer.invoke("accounts:list", keyword || ""),
   saveAccount: (account) => ipcRenderer.invoke("accounts:save", account),
   setAccountActive: (payload) => ipcRenderer.invoke("accounts:set-active", payload),
