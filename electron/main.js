@@ -459,6 +459,37 @@ ipcMain.handle("imports:opening-balances", (_event, payload = {}) => {
   saveDb();return {ok:true,inserted,skipped};
 });
 
+
+ipcMain.handle("opening:list", (_event, periodValue = "") => {
+  const period=String(periodValue||"");
+  const list=rows(
+    `SELECT o.id,o.period_key,o.sandi,o.program_code,o.debit,o.credit,a.account_name
+     FROM opening_balances o LEFT JOIN accounts a ON a.sandi=o.sandi
+     WHERE (?='' OR o.period_key=?) ORDER BY o.period_key DESC,o.sandi,o.program_code`,
+    [period,period]
+  );
+  return list;
+});
+
+ipcMain.handle("opening:save", (_event, payload = {}) => {
+  const period=String(payload.period_key||"");
+  const sandi=String(payload.sandi||"").trim();
+  const program=String(payload.program_code||"").trim();
+  const debit=Number(payload.debit||0),credit=Number(payload.credit||0);
+  if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period))throw new Error("Periode saldo awal tidak valid.");
+  if(!sandi)throw new Error("SANDI akun wajib dipilih.");
+  if(!Number.isFinite(debit)||!Number.isFinite(credit)||debit<0||credit<0||(debit>0&&credit>0)||(!(debit>0)&&!(credit>0)))throw new Error("Isi salah satu nilai debit atau kredit yang positif.");
+  const account=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi]);
+  if(!account.length)throw new Error("SANDI tidak ditemukan atau tidak aktif.");
+  const closed=rows("SELECT status FROM accounting_periods WHERE period_key=?",[period]);
+  if(closed.length&&closed[0].status==="CLOSED")throw new Error("Periode sudah ditutup.");
+  db.run("INSERT INTO opening_balances(period_key,account_id,sandi,program_code,debit,credit,source_type,updated_at) VALUES(?,?,?,?,?,?, 'MANUAL',CURRENT_TIMESTAMP) ON CONFLICT(period_key,sandi,program_code) DO UPDATE SET debit=excluded.debit,credit=excluded.credit,updated_at=CURRENT_TIMESTAMP",
+    [period,account[0].id,sandi,program,debit,credit]);
+  db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary) VALUES('SAVE_OPENING_BALANCE','OPENING_BALANCE',?,?)",
+    [period+"|"+sandi+"|"+program,"Saldo awal "+sandi+" periode "+period+" disimpan"]);
+  saveDb();return {ok:true};
+});
+
 ipcMain.handle("db:backup", async () => {
   const choice = await dialog.showSaveDialog({
     title: "Simpan Backup SBP Accounting",
