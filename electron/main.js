@@ -582,6 +582,24 @@ ipcMain.handle("periods:reopen",(_e,p={})=>{
 });
 
 
+
+ipcMain.handle("journals:correction-draft",(_e,p={})=>{
+ const id=Number(p.id),voucher=String(p.voucher_number||"").trim(),date=String(p.journal_date||"");
+ const source=rows("SELECT * FROM journal_headers WHERE id=?",[id])[0];if(!source||source.status!=="POSTED")throw new Error("Jurnal sumber harus berstatus POSTED.");
+ if(!voucher||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Nomor bukti dan tanggal koreksi wajib diisi.");
+ if(periodIsClosed(date))throw new Error("Periode koreksi sudah ditutup.");
+ if(rows("SELECT id FROM journal_headers WHERE voucher_number=?",[voucher]).length)throw new Error("Nomor bukti koreksi sudah digunakan.");
+ const lines=rows("SELECT * FROM journal_lines WHERE journal_id=? ORDER BY line_no",[id]);
+ db.run("BEGIN IMMEDIATE");try{
+  db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,source_type,source_id,source_voucher) VALUES(?,?,?,'DRAFT','CORRECTION',?,?)",
+   [date,voucher,"Koreksi atas "+source.voucher_number,String(id),source.voucher_number]);
+  const cid=db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+  const st=db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+  try{lines.forEach((x,i)=>st.run([cid,i+1,x.account_id,x.sandi,"Koreksi: "+(x.description||""),x.debit,x.credit]));}finally{st.free();}
+  audit("CREATE_CORRECTION_DRAFT","JOURNAL",cid,"Draft koreksi dibuat dari jurnal "+source.voucher_number);
+  db.run("COMMIT");saveDb();return {ok:true,id:cid};
+ }catch(e){db.run("ROLLBACK");throw e;}
+});
 ipcMain.handle("journals:reverse",(_e,p={})=>{
  const id=Number(p.id),voucher=String(p.voucher_number||"").trim(),date=String(p.journal_date||""),reason=String(p.reason||"").trim();
  const source=rows("SELECT * FROM journal_headers WHERE id=?",[id])[0];if(!source||source.status!=="POSTED")throw new Error("Jurnal sumber tidak ditemukan atau belum POSTED.");
