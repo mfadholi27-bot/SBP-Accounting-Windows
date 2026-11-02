@@ -29,6 +29,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     navButtons.forEach(button => button.classList.toggle("active", button.dataset.view === name));
     $("page-title").textContent = pageNames[name] || "Dashboard";
     if (name === "accounts") loadAccounts();
+    if (name === "journal") prepareJournal();
+    if (name === "journal-list") loadJournalList();
   }
 
   navButtons.forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
@@ -122,7 +124,217 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (!confirm((active ? "Aktifkan" : "Nonaktifkan") + " akun ini?")) return;
         await window.sbpDesktop.setAccountActive({ id, active });
         await loadAccounts();
+      
+  // Journal Maintenance: local SQLite-backed draft and posting workflow.
+  let journalAccounts = [];
+  let editingJournalId = 0;
+  const money = value => "Rp " + Number(value || 0).toLocaleString("id-ID", { maximumFractionDigits: 2 });
+
+  async function prepareJournal() {
+    try {
+      journalAccounts = (await window.sbpDesktop.listAccounts("")).filter(a => Number(a.is_active) === 1);
+      if (!document.querySelector("#journal-entry-rows .journal-entry-row")) resetJournalForm();
+      else refreshJournalTotals();
+    } catch (error) {
+      setJournalMessage("Gagal memuat Master Akun: " + error.message, true);
+    }
+  }
+
+  function accountOptions(selected = "") {
+    return '<option value="">Pilih SANDI akun</option>' + journalAccounts.map(a =>
+      '<option value="' + escapeHtml(a.sandi) + '"' + (a.sandi === selected ? " selected" : "") + '>' +
+      escapeHtml(a.sandi + " — " + a.account_name) + '</option>'
+    ).join("");
+  }
+
+  function addJournalLine(line = {}) {
+    const tr = document.createElement("tr");
+    tr.className = "journal-entry-row";
+    tr.innerHTML =
+      '<td><select class="journal-line-account">' + accountOptions(line.sandi || "") + '</select></td>' +
+      '<td class="journal-line-account-name">' + escapeHtml((journalAccounts.find(a => a.sandi === line.sandi) || {}).account_name || "—") + '</td>' +
+      '<td><input class="journal-line-note" maxlength="250" placeholder="Keterangan baris" value="' + escapeHtml(line.description || "") + '"></td>' +
+      '<td><input class="journal-line-debit amount-input" type="number" min="0" step="0.01" value="' + (line.debit || "") + '" placeholder="0"></td>' +
+      '<td><input class="journal-line-credit amount-input" type="number" min="0" step="0.01" value="' + (line.credit || "") + '" placeholder="0"></td>' +
+      '<td><button type="button" class="remove-journal-line" title="Hapus baris">×</button></td>';
+    tr.querySelector(".journal-line-account").addEventListener("change", event => {
+      const a = journalAccounts.find(item => item.sandi === event.target.value);
+      tr.querySelector(".journal-line-account-name").textContent = a ? a.account_name : "—";
+    });
+    tr.querySelectorAll("input").forEach(input => input.addEventListener("input", refreshJournalTotals));
+    tr.querySelector(".remove-journal-line").addEventListener("click", () => {
+      if (document.querySelectorAll(".journal-entry-row").length <= 2) {
+        setJournalMessage("Minimal dua baris jurnal harus tersedia.", true);
+        return;
+      }
+      tr.remove();
+      refreshJournalTotals();
+    });
+    $("journal-entry-rows").appendChild(tr);
+    refreshJournalTotals();
+  }
+
+  function setJournalMessage(message, isError = false) {
+    const el = $("journal-message");
+    el.textContent = message;
+    el.classList.toggle("error", Boolean(isError));
+  }
+
+  function refreshJournalTotals() {
+    let debit = 0, credit = 0;
+    document.querySelectorAll(".journal-entry-row").forEach(row => {
+      debit += Number(row.querySelector(".journal-line-debit").value || 0);
+      credit += Number(row.querySelector(".journal-line-credit").value || 0);
+    });
+    $("journal-total-debit").textContent = money(debit);
+    $("journal-total-credit").textContent = money(credit);
+    $("journal-total-diff").textContent = money(Math.abs(debit - credit));
+    $("journal-total-diff").classList.toggle("balanced", Math.abs(debit - credit) <= 0.005);
+    $("journal-total-diff").classList.toggle("unbalanced", Math.abs(debit - credit) > 0.005);
+  }
+
+  function resetJournalForm() {
+    editingJournalId = 0;
+    $("j-date").value = new Date().toISOString().slice(0, 10);
+    $("j-number").value = "";
+    $("j-description").value = "";
+    $("journal-entry-rows").innerHTML = "";
+    addJournalLine();
+    addJournalLine();
+    $("save-journal-draft").textContent = "Simpan Draft";
+    $("post-journal").textContent = "Posting Jurnal";
+    setJournalMessage("Isi transaksi. Draft boleh belum seimbang; posting wajib seimbang.");
+  }
+
+  function collectJournalPayload(status) {
+    const lines = Array.from(document.querySelectorAll(".journal-entry-row")).map(row => ({
+      sandi: row.querySelector(".journal-line-account").value,
+      description: row.querySelector(".journal-line-note").value.trim(),
+      debit: Number(row.querySelector(".journal-line-debit").value || 0),
+      credit: Number(row.querySelector(".journal-line-credit").value || 0)
+    }));
+    return {
+      id: editingJournalId,
+      journal_date: $("j-date").value,
+      voucher_number: $("j-number").value.trim(),
+      description: $("j-description").value.trim(),
+      status,
+      lines
+    };
+  }
+
+  async function saveJournal(status) {
+    const payload = collectJournalPayload(status);
+    if (!payload.journal_date || !payload.voucher_number || !payload.description) {
+      setJournalMessage("Tanggal, nomor bukti, dan keterangan wajib diisi.", true);
+      return;
+    }
+    if (payload.lines.length < 2) {
+      setJournalMessage("Jurnal minimal memiliki dua baris.", true);
+      return;
+    }
+    try {
+      const result = await window.sbpDesktop.saveJournal(payload);
+      setJournalMessage(status === "POSTED" ? "Jurnal berhasil diposting." : "Draft jurnal berhasil disimpan.");
+      editingJournalId = 0;
+      await refreshSummary();
+      resetJournalForm();
+      showView("journal-list");
+      await loadJournalList();
+    } catch (error) {
+      setJournalMessage(error.message || "Gagal menyimpan jurnal.", true);
+    }
+  }
+
+  async function editDraftJournal(id) {
+    try {
+      const all = await window.sbpDesktop.listJournals({ status: "DRAFT" });
+      const item = all.find(j => Number(j.id) === Number(id));
+      if (!item) throw new Error("Draft tidak ditemukan.");
+      if (item.status !== "DRAFT") throw new Error("Jurnal POSTED tidak dapat diedit.");
+      await prepareJournal();
+      editingJournalId = Number(item.id);
+      $("j-date").value = item.journal_date;
+      $("j-number").value = item.voucher_number;
+      $("j-description").value = item.description;
+      $("journal-entry-rows").innerHTML = "";
+      item.lines.forEach(line => addJournalLine(line));
+      while (document.querySelectorAll(".journal-entry-row").length < 2) addJournalLine();
+      $("save-journal-draft").textContent = "Perbarui Draft";
+      $("post-journal").textContent = "Posting Jurnal";
+      setJournalMessage("Mengedit draft " + item.voucher_number + ". Jurnal POSTED tidak dapat diubah.");
+      showView("journal");
+    } catch (error) {
+      alert(error.message || "Draft gagal dibuka.");
+    }
+  }
+
+  async function loadJournalList() {
+    const body = $("journal-list-rows");
+    if (!body) return;
+    body.innerHTML = '<tr><td colspan="7" class="empty">Memuat daftar jurnal...</td></tr>';
+    try {
+      const items = await window.sbpDesktop.listJournals({
+        keyword: $("journal-search").value,
+        status: $("journal-status").value,
+        dateFrom: $("journal-from").value,
+        dateTo: $("journal-to").value
+      });
+      $("journal-list-count").textContent = items.length + " jurnal";
+      if (!items.length) {
+        body.innerHTML = '<tr><td colspan="7" class="empty">Belum ada jurnal yang cocok dengan filter.</td></tr>';
+        return;
+      }
+      body.innerHTML = items.map(item => {
+        const draft = item.status === "DRAFT";
+        return '<tr><td>' + escapeHtml(item.journal_date) + '</td>' +
+          '<td><b>' + escapeHtml(item.voucher_number) + '</b></td>' +
+          '<td>' + escapeHtml(item.description) + '</td>' +
+          '<td><span class="status-pill ' + (draft ? "off" : "on") + '">' + (draft ? "DRAFT" : "POSTED") + '</span></td>' +
+          '<td class="money-cell">' + money(item.total_debit) + '</td>' +
+          '<td class="money-cell">' + money(item.total_credit) + '</td>' +
+          '<td><div class="row-actions">' + (draft ? '<button class="small-action" data-journal-action="edit" data-id="' + item.id + '">Edit</button><button class="small-action danger" data-journal-action="delete" data-id="' + item.id + '">Hapus</button>' : '<button class="small-action" data-journal-action="detail" data-id="' + item.id + '">Detail</button>') + '</div></td></tr>';
+      }).join("");
+    } catch (error) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">Gagal memuat jurnal: ' + escapeHtml(error.message) + '</td></tr>';
+    }
+  }
+
+  $("add-journal-line").addEventListener("click", () => addJournalLine());
+  $("reset-journal").addEventListener("click", () => {
+    if (confirm("Kosongkan seluruh isian form jurnal?")) resetJournalForm();
+  });
+  $("save-journal-draft").addEventListener("click", () => saveJournal("DRAFT"));
+  $("post-journal").addEventListener("click", () => saveJournal("POSTED"));
+  $("new-journal").addEventListener("click", async () => {
+    await prepareJournal();
+    resetJournalForm();
+    showView("journal");
+  });
+  $("filter-journals").addEventListener("click", loadJournalList);
+  $("journal-search").addEventListener("keydown", event => { if (event.key === "Enter") loadJournalList(); });
+  $("journal-list-rows").addEventListener("click", async event => {
+    const button = event.target.closest("button[data-journal-action]");
+    if (!button) return;
+    const id = Number(button.dataset.id);
+    const action = button.dataset.journalAction;
+    if (action === "edit") return editDraftJournal(id);
+    if (action === "delete") {
+      if (!confirm("Hapus draft jurnal ini?")) return;
+      try {
+        await window.sbpDesktop.deleteDraftJournal(id);
+        await loadJournalList();
         await refreshSummary();
+      } catch (error) { alert(error.message || "Draft tidak dapat dihapus."); }
+    }
+    if (action === "detail") {
+      const items = await window.sbpDesktop.listJournals({ status: "POSTED" });
+      const item = items.find(j => Number(j.id) === id);
+      if (item) alert(item.voucher_number + "\\n" + item.description + "\\n\\nDebit: " + money(item.total_debit) + "\\nKredit: " + money(item.total_credit) + "\\n\\nJurnal POSTED bersifat terkunci.");
+    }
+  });
+
+  await refreshSummary();
       } else if (action === "delete") {
         if (!confirm("Hapus akun ini secara permanen? Tindakan ini tidak dapat dibatalkan.")) return;
         await window.sbpDesktop.deleteAccount(id);
