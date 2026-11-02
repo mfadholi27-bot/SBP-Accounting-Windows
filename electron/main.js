@@ -406,6 +406,7 @@ ipcMain.handle("nptrans:import", (_event, payload = {}) => {
   const mode=String(payload.mode||"merge");
   if(!items.length)throw new Error("Tidak ada baris NPTRANS yang valid.");
   if(!["merge","append","replace"].includes(mode))throw new Error("Mode import tidak dikenal.");
+  for(const item of items){const date=String(item.transaction_date||"");if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Tanggal NPTRANS tidak valid pada baris "+String(item.source_row_no||"?")+".");const period=rows("SELECT status FROM accounting_periods WHERE period_key=?",[date.slice(0,7)]);if(period.length&&period[0].status==="CLOSED")throw new Error("Import diblokir: periode "+date.slice(0,7)+" sudah ditutup.");}
   const importName=String(payload.file_name||"NPTRANS import");
   const hash=String(payload.source_hash||"");
   let inserted=0,skipped=0;
@@ -446,6 +447,7 @@ ipcMain.handle("imports:opening-balances", (_event, payload = {}) => {
       for(const x of items){
         const period=String(x.period_key||""),sandi=String(x.sandi||"").trim();
         if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)||!sandi) {skipped++;continue;}
+        const closed=rows("SELECT status FROM accounting_periods WHERE period_key=?",[period]);if(closed.length&&closed[0].status==="CLOSED")throw new Error("Periode "+period+" sudah ditutup; saldo awal tidak diimpor.");
         const acc=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi]);
         if(!acc.length)throw new Error("SANDI "+sandi+" tidak ditemukan atau tidak aktif.");
         stmt.run([period,acc[0].id,sandi,String(x.program_code||""),Number(x.debit||0),Number(x.credit||0),"IMPORT",String(payload.file_name||"")]);
