@@ -325,3 +325,67 @@ footer{margin:30px 0 0;padding:15px 0;border-top:1px solid var(--sbp-line);color
  .view{display:none!important}.view.active-view{display:block!important}
  .panel,.table-wrap{box-shadow:none!important;border:0!important}
 }
+
+
+/* =========================================================
+   V20 LAYOUT HOTFIX — SINGLE GRID SHELL
+   Fix flex/fixed sidebar collision and content width collapse.
+   ========================================================= */
+html,body{width:100%;min-width:0;min-height:100%;overflow-x:hidden}
+body{
+ display:grid!important;
+ grid-template-columns:278px minmax(0,1fr)!important;
+ align-items:start;
+ gap:0;
+}
+.sidebar{
+ position:sticky!important;
+ inset:auto!important;
+ top:0!important;
+ grid-column:1;
+ grid-row:1;
+ width:278px!important;
+ min-width:278px!important;
+ max-width:278px!important;
+ height:100vh!important;
+ max-height:100vh!important;
+ min-height:100vh!important;
+ overflow-y:auto!important;
+}
+.main{
+ grid-column:2;
+ grid-row:1;
+ width:100%!important;
+ min-width:0!important;
+ max-width:none!important;
+ margin:0!important;
+ padding:27px clamp(22px,3vw,46px) 42px!important;
+}
+.top{
+ width:calc(100% + 2 * clamp(22px,3vw,46px));
+ margin:-27px calc(-1 * clamp(22px,3vw,46px)) 25px!important;
+ padding:13px clamp(22px,3vw,46px)!important;
+ box-sizing:border-box;
+}
+.view{width:100%;max-width:1600px;min-width:0;margin:0 auto}
+.panel,.toolbar,.filterbar,.table-wrap{min-width:0;max-width:100%}
+.table-wrap{overflow-x:auto;overscroll-behavior-x:contain}
+#view-opening-balances .data-table{min-width:680px}
+#view-opening-balances .data-table th,
+#view-opening-balances .data-table td{white-space:nowrap}
+#view-opening-balances .panel-head{align-items:center}
+#view-opening-balances .opening-form-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+#view-opening-balances .opening-form-grid button{width:100%;min-height:42px}
+@media(max-width:1000px){
+ body{grid-template-columns:240px minmax(0,1fr)!important}
+ .sidebar{width:240px!important;min-width:240px!important;max-width:240px!important}
+ .main{padding:22px!important}
+ .top{width:calc(100% + 44px);margin:-22px -22px 20px!important;padding:12px 22px!important}
+}
+@media(max-width:720px){
+ body{display:block!important}
+ .sidebar{position:relative!important;inset:auto!important;top:auto!important;width:100%!important;min-width:0!important;max-width:none!important;height:auto!important;min-height:0!important;max-height:44vh!important}
+ .main{display:block;width:100%!important;margin:0!important;padding:16px!important}
+ .top{position:relative;margin:-16px -16px 17px!important;width:calc(100% + 32px);padding:13px 16px!important}
+ #view-opening-balances .opening-form-grid{grid-template-columns:1fr}
+}
