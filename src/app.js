@@ -597,6 +597,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       $("report-summary").className="import-message "+(Math.abs(debit-credit)<0.005?"success":"error");
     }catch(e){$("report-summary").textContent=e.message;}
   });
+
+  function renderReportTable(headers,rowsHtml){$("report-table-head").innerHTML="<tr>"+headers.map(x=>"<th>"+escapeHtml(x)+"</th>").join("")+"</tr>";$("trial-balance-rows").innerHTML=rowsHtml;}
+  $("report-income-run").addEventListener("click",async()=>{
+    try{const p=$("report-period").value,from=p+"-01",last=new Date(Number(p.slice(0,4)),Number(p.slice(5,7)),0).getDate(),to=p+"-"+String(last).padStart(2,"0");
+      const r=await window.sbpDesktop.incomeStatement({date_from:from,date_to:to});
+      renderReportTable(["SANDI","Nama Akun","Jenis","Debit","Kredit","Saldo Laporan"],r.rows.map(x=>"<tr><td>"+escapeHtml(x.sandi)+"</td><td>"+escapeHtml(x.account_name)+"</td><td>"+escapeHtml(x.account_type)+"</td><td>"+money(x.debit)+"</td><td>"+money(x.credit)+"</td><td>"+money(x.net)+"</td></tr>").join(""));
+      $("report-summary").textContent="Pendapatan "+money(r.revenue)+" · Beban "+money(r.expense)+" · Laba/(Rugi) "+money(r.netProfit)+". Periode "+from+" s.d. "+to;
+      $("report-summary").className="import-message "+(r.netProfit>=0?"success":"error");
+    }catch(e){$("report-summary").textContent=e.message;}
+  });
+  $("report-balance-run").addEventListener("click",async()=>{
+    try{const p=$("report-period").value,last=new Date(Number(p.slice(0,4)),Number(p.slice(5,7)),0).getDate(),asOf=p+"-"+String(last).padStart(2,"0");
+      const r=await window.sbpDesktop.balanceSheet({as_of:asOf});
+      renderReportTable(["SANDI","Nama Akun","Kelompok","Saldo Posisi"],r.rows.map(x=>"<tr><td>"+escapeHtml(x.sandi)+"</td><td>"+escapeHtml(x.account_name)+"</td><td>"+escapeHtml(x.account_type)+"</td><td>"+money(x.display_balance)+"</td></tr>").join(""));
+      $("report-summary").textContent="Posisi "+asOf+" · Aset "+money(r.assets)+" · Kewajiban "+money(r.liabilities)+" · Ekuitas "+money(r.equity)+" · Selisih "+money(r.difference)+(Math.abs(r.difference)<0.005?" · SEIMBANG":" · PERLU REKONSILIASI");
+      $("report-summary").className="import-message "+(Math.abs(r.difference)<0.005?"success":"error");
+    }catch(e){$("report-summary").textContent=e.message;}
+  });
+  $("audit-export").addEventListener("click",async()=>{try{const r=await window.sbpDesktop.exportAudit();$("audit-rows").dataset.exportMessage=r.canceled?"Ekspor dibatalkan.":"CSV audit diekspor: "+r.count+" baris.";}catch(e){alert(e.message);}});
+
   $("report-print").addEventListener("click",()=>window.print());
   $("validation-run").addEventListener("click",async()=>{
     try{const issues=await window.sbpDesktop.runValidation();
