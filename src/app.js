@@ -435,15 +435,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const result = await window.sbpDesktop.saveJournal(payload);
       setJournalMessage(status === "POSTED" ? "Jurnal berhasil diposting." : "Draft jurnal berhasil disimpan.");
       editingJournalId = 0;
-      $("dn-date").value=new Date().toISOString().slice(0,10);
-  addDebitNoteLine();addDebitNoteLine();
-  $("period-key").value=new Date().toISOString().slice(0,7);
-  $("report-period").value=new Date().toISOString().slice(0,7);
-  $("admin-reversal-date").value=new Date().toISOString().slice(0,10);
-  $("archive-from").value=new Date().getFullYear()+"-01-01";
-  $("archive-to").value=new Date().toISOString().slice(0,10);
-  await loadAdminModules();
-  await refreshSummary();
+      await refreshSummary();
       resetJournalForm();
       showView("journal-list");
       await loadJournalList();
@@ -899,5 +891,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("opening-period").value=new Date().toISOString().slice(0,7);
   loadOpeningBalances().catch(()=>{});
 
+  $("dn-date").value=new Date().toISOString().slice(0,10);
+  addDebitNoteLine();addDebitNoteLine();
+  $("period-key").value=new Date().toISOString().slice(0,7);
+  $("report-period").value=new Date().toISOString().slice(0,7);
+  $("admin-reversal-date").value=new Date().toISOString().slice(0,10);
+  $("archive-from").value=new Date().getFullYear()+"-01-01";
+  $("archive-to").value=new Date().toISOString().slice(0,10);
+  await loadAdminModules();
   await refreshSummary();
 });
