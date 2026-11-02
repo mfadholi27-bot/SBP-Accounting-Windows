@@ -585,7 +585,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       $("ledger-message").textContent=list.length+" transaksi POSTED ditampilkan.";
     }catch(e){$("ledger-message").textContent=e.message;}
   });
-$("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger-rows").querySelectorAll("tr")).map(tr=>Array.from(tr.children).map(td=>td.textContent));if(!rows.length||rows[0].length!==6){alert("Tampilkan Buku Besar terlebih dahulu.");return;}const csv=[["Tanggal","Nomor Bukti","Keterangan","Debit","Kredit","Saldo"],...rows].map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\\r\\n");const blob=new Blob(["\\uFEFF"+csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="Buku-Besar-"+$("ledger-account").value+".csv";a.click();URL.revokeObjectURL(url);});
+$("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger-rows").querySelectorAll("tr")).map(tr=>Array.from(tr.children).map(td=>td.textContent));if(!rows.length||rows[0].length!==6){alert("Tampilkan Buku Besar terlebih dahulu.");return;}const csv=[["Tanggal","Nomor Bukti","Keterangan","Debit","Kredit","Saldo"],...rows].map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\\r\\n");const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="Buku-Besar-"+$("ledger-account").value+".csv";a.click();URL.revokeObjectURL(url);});
   $("ledger-print").addEventListener("click",()=>window.print());
   $("report-trial-run").addEventListener("click",async()=>{
     try{const list=await window.sbpDesktop.trialBalance({period_key:$("report-period").value});
@@ -715,18 +715,18 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
 
   // Legacy Import Center: local XLSX/CSV/DBF parsing with explicit preview and approval.
   let pendingNptransBatch=null,pendingAccountBatch=null,pendingOpeningBatch=null;
-  const importNorm=value=>String(value??"").trim().toUpperCase().replace(/[\\s_./-]+/g,"").replace(/[^A-Z0-9]/g,"");
+  const importNorm=value=>String(value??"").trim().toUpperCase().replace(/[\s_./-]+/g,"").replace(/[^A-Z0-9]/g,"");
   const importAmount=value=>{
     if(value===null||value===undefined||value==="")return 0;
     if(typeof value==="number")return Number.isFinite(value)?value:NaN;
-    let s=String(value).trim().replace(/[\\s\\u00a0]/g,"").replace(/^Rp/i,"").replace(/[^0-9,.-]/g,"");
-    if(s.includes(",")&&s.includes("."))s=s.lastIndexOf(",")>s.lastIndexOf(".")?s.replace(/\\./g,"").replace(",","."):s.replace(/,/g,"");
+    let s=String(value).trim().replace(/[\s\u00a0]/g,"").replace(/^Rp/i,"").replace(/[^0-9,.-]/g,"");
+    if(s.includes(",")&&s.includes("."))s=s.lastIndexOf(",")>s.lastIndexOf(".")?s.replace(/\./g,"").replace(",","."):s.replace(/,/g,"");
     else if(s.includes(",")){const a=s.split(",");s=a.length===2&&a[1].length<=2?s.replace(",","."):s.replace(/,/g,"");}
     const n=Number(s);return Number.isFinite(n)?n:NaN;
   };
   function parseImportCsv(text){
     const rows=[];let row=[],cell="",quoted=false;
-    const s=String(text||"").replace(/^\\uFEFF/,"");
+    const s=String(text||"").replace(/^\uFEFF/,"");
     for(let i=0;i<s.length;i++){
       const ch=s[i],next=s[i+1];
       if(ch==='"'&&quoted&&next==='"'){cell+='"';i++;}
@@ -760,10 +760,10 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
       if(b[p]===0x2a)continue;
       let q=p+1,obj={};
       for(const f of fields){
-        const raw=decoder.decode(b.slice(q,q+f.length)).replace(/\\u0000/g,"").trim();q+=f.length;
+        const raw=decoder.decode(b.slice(q,q+f.length)).replace(/\u0000/g,"").trim();q+=f.length;
         let val=raw;
         if(f.type==="N"||f.type==="F")val=raw===""?0:importAmount(raw);
-        else if(f.type==="D"&&/^\\d{8}$/.test(raw))val=raw.slice(0,4)+"-"+raw.slice(4,6)+"-"+raw.slice(6,8);
+        else if(f.type==="D"&&/^\d{8}$/.test(raw))val=raw.slice(0,4)+"-"+raw.slice(4,6)+"-"+raw.slice(6,8);
         obj[f.name]=val;
       }
       records.push(obj);
@@ -795,9 +795,9 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
   }
   function importDate(value){
     let s=String(value??"").trim();
-    if(/^\\d{8}$/.test(s))return s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8);
-    if(/^\\d{4}-\\d{2}-\\d{2}$/.test(s))return s;
-    let m=s.match(/^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$/);
+    if(/^\d{8}$/.test(s))return s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+    let m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
     if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
     return s;
   }
@@ -820,7 +820,7 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
       const header=findImportHeader(raw,["SANDI","TANGGAL","NOBUKTI","NOURUT","KET","JUMLAH"],{TANGGAL:["DATE"],NOBUKTI:["NOMORBUKTI","BUKTI"],NOURUT:["URUT","NO"],KET:["KETERANGAN","URAIAN"],JUMLAH:["NILAI","AMOUNT"]});
       const items=raw.slice(header.index+1).map((r,i)=>({sandi:String(r[header.map.SANDI]??"").trim(),transaction_date:importDate(r[header.map.TANGGAL]),voucher_number:String(r[header.map.NOBUKTI]??"").trim(),row_number:String(r[header.map.NOURUT]??"").trim(),description:String(r[header.map.KET]??"").trim(),amount:importAmount(r[header.map.JUMLAH]),source_row_no:header.index+i+2,raw:r}))
         .filter(x=>x.sandi||x.voucher_number||x.description||x.amount);
-      const valid=items.filter(x=>x.sandi&&x.voucher_number&&/^\\d{4}-\\d{2}-\\d{2}$/.test(x.transaction_date)&&Number.isFinite(x.amount));
+      const valid=items.filter(x=>x.sandi&&x.voucher_number&&/^\d{4}-\d{2}-\d{2}$/.test(x.transaction_date)&&Number.isFinite(x.amount));
       const invalid=items.length-valid.length;
       const mode=$("nptrans-mode").value;
       const current=await window.sbpDesktop.listNptrans({});
@@ -883,7 +883,7 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
       const items=raw.slice(head.index+1).map((r,i)=>({period_key:String(r[head.map.PERIODE]??"").trim(),sandi:String(r[head.map.SANDI]??"").trim(),debit:importAmount(r[d]),credit:importAmount(r[cr]),program_code:program>=0?String(r[program]??"").trim():"",row:i+head.index+2})).filter(x=>x.sandi||x.period_key);
       const accounts=await window.sbpDesktop.listAccounts("");
       const errors=[];
-      items.forEach(x=>{if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(x.period_key))errors.push("Baris "+x.row+": periode harus YYYY-MM.");if(!accounts.some(a=>a.sandi===x.sandi))errors.push("Baris "+x.row+": SANDI tidak ada di Master Akun.");if(!Number.isFinite(x.debit)||!Number.isFinite(x.credit)||x.debit<0||x.credit<0||(x.debit>0&&x.credit>0)||(!(x.debit>0)&&!(x.credit>0)))errors.push("Baris "+x.row+": isi salah satu debit/kredit dengan nominal positif.");});
+      items.forEach(x=>{if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(x.period_key))errors.push("Baris "+x.row+": periode harus YYYY-MM.");if(!accounts.some(a=>a.sandi===x.sandi))errors.push("Baris "+x.row+": SANDI tidak ada di Master Akun.");if(!Number.isFinite(x.debit)||!Number.isFinite(x.credit)||x.debit<0||x.credit<0||(x.debit>0&&x.credit>0)||(!(x.debit>0)&&!(x.credit>0)))errors.push("Baris "+x.row+": isi salah satu debit/kredit dengan nominal positif.");});
       pendingOpeningBatch={file_name:selectedOpeningFile.name,items,errors};
       $("opening-import-summary").textContent=items.length+" baris dibaca · "+(items.length-errors.length)+" baris berpotensi valid";
       $("opening-import-detail").textContent=errors.length?errors.slice(0,12).join(" | "):"Validasi format dan Master Akun berhasil. Duplikat di database akan dilewati.";
