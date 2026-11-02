@@ -38,5 +38,6 @@ contextBridge.exposeInMainWorld("sbpDesktop", {
   createArchive: (payload) => ipcRenderer.invoke("archive:create", payload),
   listArchives: () => ipcRenderer.invoke("archive:list"),
   readArchive: () => ipcRenderer.invoke("archive:read"),
-  restoreDatabase: () => ipcRenderer.invoke("db:restore")
+  restoreDatabase: () => ipcRenderer.invoke("db:restore"),
+  reverseJournal: (payload) => ipcRenderer.invoke("journals:reverse", payload)
 });
