@@ -1,7 +1,6 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, protocol } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { pathToFileURL } = require("url");
 protocol.registerSchemesAsPrivileged([{scheme:"sbp",privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 let mainWindow;
 let quitting = false;
@@ -60,6 +59,6 @@ function createWindow(){
   mainWindow.on("closed",()=>{mainWindow=null;});
 }
 const template=[{label:"File",submenu:[{label:"Backup Data Windows...",click:()=>mainWindow?.webContents.send("sbp:menu-backup")},{label:"Restore Backup...",click:()=>mainWindow?.webContents.send("sbp:menu-restore")},{type:"separator"},{role:"quit"}]},{label:"View",submenu:[{role:"reload"},{role:"toggleDevTools"},{type:"separator"},{role:"resetZoom"},{role:"zoomIn"},{role:"zoomOut"},{type:"separator"},{role:"togglefullscreen"}]}];
-app.whenReady().then(()=>{protocol.handle("sbp",request=>{try{return net.fetch(pathToFileURL(appFilePath(new URL(request.url).pathname)).toString());}catch(e){return new Response("Not found",{status:404});}});Menu.setApplicationMenu(Menu.buildFromTemplate(template));createWindow();app.on("activate",()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
+app.whenReady().then(()=>{protocol.registerFileProtocol("sbp",(request,callback)=>{try{const filePath=appFilePath(new URL(request.url).pathname);if(!fs.existsSync(filePath)){callback({error:-6});return;}callback({path:filePath});}catch(e){console.error("SBP protocol error:",e);callback({error:-2});}});Menu.setApplicationMenu(Menu.buildFromTemplate(template));createWindow();app.on("activate",()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});}).catch(error=>{console.error("SBP startup failed:",error);dialog.showErrorBox("SBP Accounting V19 gagal dibuka",String(error&&error.stack||error));app.quit();});
 app.on("before-quit",event=>{if(quitting)return;event.preventDefault();quitting=true;automaticBackup().finally(()=>{if(mainWindow)mainWindow.destroy();else app.quit();});});
 app.on("window-all-closed",()=>{if(process.platform!=="darwin"&&!quitting)app.quit();});
