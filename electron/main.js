@@ -290,6 +290,80 @@ ipcMain.handle("journals:delete-draft", (_event, idValue) => {
   return { ok: true };
 });
 
+
+ipcMain.handle("budgets:list", (_event, yearValue) => {
+  const year = Number(yearValue || new Date().getFullYear());
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error("Tahun anggaran tidak valid.");
+  const budgets = rows(
+    `SELECT b.sandi, a.account_name, b.fiscal_year,
+       SUM(CASE WHEN b.month_no=1 THEN b.budget_amount ELSE 0 END) AS m01,
+       SUM(CASE WHEN b.month_no=2 THEN b.budget_amount ELSE 0 END) AS m02,
+       SUM(CASE WHEN b.month_no=3 THEN b.budget_amount ELSE 0 END) AS m03,
+       SUM(CASE WHEN b.month_no=4 THEN b.budget_amount ELSE 0 END) AS m04,
+       SUM(CASE WHEN b.month_no=5 THEN b.budget_amount ELSE 0 END) AS m05,
+       SUM(CASE WHEN b.month_no=6 THEN b.budget_amount ELSE 0 END) AS m06,
+       SUM(CASE WHEN b.month_no=7 THEN b.budget_amount ELSE 0 END) AS m07,
+       SUM(CASE WHEN b.month_no=8 THEN b.budget_amount ELSE 0 END) AS m08,
+       SUM(CASE WHEN b.month_no=9 THEN b.budget_amount ELSE 0 END) AS m09,
+       SUM(CASE WHEN b.month_no=10 THEN b.budget_amount ELSE 0 END) AS m10,
+       SUM(CASE WHEN b.month_no=11 THEN b.budget_amount ELSE 0 END) AS m11,
+       SUM(CASE WHEN b.month_no=12 THEN b.budget_amount ELSE 0 END) AS m12,
+       COALESCE(SUM(b.budget_amount),0) AS annual
+     FROM annual_budgets b LEFT JOIN accounts a ON a.sandi=b.sandi
+     WHERE b.fiscal_year=? AND COALESCE(b.program_code,'')=''
+     GROUP BY b.sandi,b.fiscal_year,a.account_name ORDER BY b.sandi`, [year]
+  );
+  return budgets.map(item => {
+    const actual = rows(
+      `SELECT CAST(substr(j.journal_date,6,2) AS INTEGER) AS month_no,
+       COALESCE(SUM(l.debit-l.credit),0) AS net
+       FROM journal_headers j JOIN journal_lines l ON l.journal_id=j.id
+       WHERE j.status='POSTED' AND substr(j.journal_date,1,4)=? AND l.sandi=?
+       GROUP BY substr(j.journal_date,6,2)`, [String(year), item.sandi]
+    );
+    const actualByMonth = Array(12).fill(0);
+    actual.forEach(x => { if (x.month_no >= 1 && x.month_no <= 12) actualByMonth[x.month_no-1] = Number(x.net || 0); });
+    const monthly = Array.from({length:12}, (_,i) => Number(item["m"+String(i+1).padStart(2,"0")] || 0));
+    const totalActual = actualByMonth.reduce((a,b)=>a+b,0);
+    return { sandi:item.sandi, account_name:item.account_name || "—", fiscal_year:year,
+      monthly, actualByMonth, annual:Number(item.annual || 0), actual:totalActual,
+      remaining:Number(item.annual || 0)-totalActual };
+  });
+});
+
+ipcMain.handle("budgets:save", (_event, payload = {}) => {
+  const year = Number(payload.fiscal_year);
+  const sandi = String(payload.sandi || "").trim();
+  const monthly = Array.isArray(payload.monthly) ? payload.monthly.map(Number) : [];
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error("Tahun anggaran harus 2000–2100.");
+  if (!sandi) throw new Error("SANDI akun wajib dipilih.");
+  if (monthly.length !== 12 || monthly.some(x => !Number.isFinite(x) || x < 0)) throw new Error("Isi 12 nilai anggaran bulanan yang valid dan tidak negatif.");
+  const account = rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1", [sandi]);
+  if (!account.length) throw new Error("SANDI tidak ditemukan atau tidak aktif pada Master Akun.");
+  db.run("BEGIN IMMEDIATE");
+  try {
+    db.run("DELETE FROM annual_budgets WHERE fiscal_year=? AND sandi=? AND COALESCE(program_code,'')=''", [year,sandi]);
+    const stmt=db.prepare("INSERT INTO annual_budgets(fiscal_year,account_id,sandi,month_no,budget_amount,program_code,updated_at) VALUES(?,?,?,?,?,'',CURRENT_TIMESTAMP)");
+    try { monthly.forEach((amount,index)=>stmt.run([year,account[0].id,sandi,index+1,amount])); }
+    finally { stmt.free(); }
+    db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary) VALUES('SAVE_ANNUAL_BUDGET','ANNUAL_BUDGET',?,?)",
+      [year+"|"+sandi,"Anggaran tahunan "+sandi+" tahun "+year+" disimpan"]);
+    db.run("COMMIT");
+  } catch(error) { db.run("ROLLBACK"); throw error; }
+  saveDb();
+  return {ok:true,annual:monthly.reduce((a,b)=>a+b,0)};
+});
+
+ipcMain.handle("budgets:delete", (_event, payload = {}) => {
+  const year=Number(payload.fiscal_year),sandi=String(payload.sandi || "").trim();
+  if(!Number.isInteger(year)||!sandi) throw new Error("Tahun atau SANDI tidak valid.");
+  db.run("DELETE FROM annual_budgets WHERE fiscal_year=? AND sandi=? AND COALESCE(program_code,'')=''",[year,sandi]);
+  db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary) VALUES('DELETE_ANNUAL_BUDGET','ANNUAL_BUDGET',?,?)",
+    [year+"|"+sandi,"Anggaran "+sandi+" tahun "+year+" dihapus"]);
+  saveDb();
+  return {ok:true};
+});
+
 ipcMain.handle("db:backup", async () => {
   const choice = await dialog.showSaveDialog({
     title: "Simpan Backup SBP Accounting",
