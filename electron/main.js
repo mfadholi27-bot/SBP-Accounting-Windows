@@ -749,6 +749,42 @@ ipcMain.handle("archive:read",async(_e,p={})=>{
  return {ok:true,verified:Boolean(record&&record.metadata_json&&JSON.parse(record.metadata_json).sha256),metadata:{createdAt:data.createdAt,dateFrom:data.dateFrom,dateTo:data.dateTo,journalCount:data.journals.length,journalLineCount:journalLines,accountCount:(data.accounts||[]).length},data};
 });
 
+ipcMain.handle("journals:import-bulk", (_event, payload = {}) => {
+  const groups=Array.isArray(payload.groups)?payload.groups:[];
+  if(!groups.length)throw new Error("Tidak ada kelompok jurnal untuk diimpor.");
+  const errors=[],seen=new Set();
+  groups.forEach((g,index)=>{
+    const date=String(g.journal_date||""),voucher=String(g.voucher_number||"").trim(),description=String(g.description||"").trim(),lines=Array.isArray(g.lines)?g.lines:[];
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date))errors.push("Kelompok "+(index+1)+": tanggal tidak valid.");
+    if(!voucher)errors.push("Kelompok "+(index+1)+": nomor bukti kosong.");
+    if(!description)errors.push("Nomor "+voucher+": keterangan jurnal kosong.");
+    if(lines.length<2)errors.push("Nomor "+voucher+": minimal dua baris.");
+    if(seen.has(voucher)||rows("SELECT id FROM journal_headers WHERE voucher_number=?",[voucher]).length)errors.push("Nomor bukti "+voucher+" sudah digunakan/duplikat.");
+    seen.add(voucher);
+    const period=rows("SELECT status FROM accounting_periods WHERE period_key=?",[date.slice(0,7)]);
+    if(period.length&&period[0].status==="CLOSED")errors.push("Periode "+date.slice(0,7)+" sudah ditutup.");
+    lines.forEach((line,n)=>{
+      const sandi=String(line.sandi||"").trim(),debit=Number(line.debit||0),credit=Number(line.credit||0);
+      if(!rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi]).length)errors.push("Nomor "+voucher+" baris "+(n+1)+": SANDI "+sandi+" tidak ada/aktif.");
+      if(!Number.isFinite(debit)||!Number.isFinite(credit)||debit<0||credit<0||(debit>0&&credit>0))errors.push("Nomor "+voucher+" baris "+(n+1)+": nominal tidak valid.");
+    });
+  });
+  if(errors.length)throw new Error("Import massal dibatalkan ("+errors.length+" masalah): "+errors.slice(0,10).join(" | "));
+  let inserted=0;
+  db.run("BEGIN IMMEDIATE");
+  try{
+    for(const g of groups){
+      db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,source_type,created_at) VALUES(?,?,?,'DRAFT','BULK_IMPORT',CURRENT_TIMESTAMP)",[g.journal_date,g.voucher_number,g.description]);
+      const jid=db.exec("SELECT last_insert_rowid()")[0].values[0][0],st=db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+      try{g.lines.forEach((line,i)=>{const sandi=String(line.sandi).trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[sandi])[0];st.run([jid,i+1,acc.id,sandi,String(line.line_description||""),Number(line.debit||0),Number(line.credit||0)]);});}finally{st.free();}
+      inserted++;
+    }
+    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('BULK_IMPORT_JOURNALS','JOURNAL',?)",["Import massal: "+inserted+" jurnal DRAFT."]);
+    db.run("COMMIT");
+  }catch(error){db.run("ROLLBACK");throw error;}
+  saveDb();return {ok:true,inserted};
+});
+
 ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
   const legacy = payload.state || {};
   if (Number(payload.version) !== 19 || !Array.isArray(legacy.accounts) || !Array.isArray(legacy.journals)) {
