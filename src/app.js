@@ -625,6 +625,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       await refreshSummary();
     }catch(e){$("admin-message").textContent=e.message;$("admin-message").className="import-message error";}
   });
+  $("admin-correction-date").value=new Date().toISOString().slice(0,10);
+  $("admin-correction-create").addEventListener("click",async()=>{
+    try{const r=await window.sbpDesktop.createCorrectionDraft({id:Number($("admin-correction-id").value),voucher_number:$("admin-correction-voucher").value,journal_date:$("admin-correction-date").value});
+      $("admin-correction-message").textContent="Draft koreksi dibuat dengan ID "+r.id+". Buka Jurnal Maintenance untuk memeriksa dan menyelesaikannya.";
+      $("admin-correction-message").className="import-message success";await refreshSummary();
+    }catch(e){$("admin-correction-message").textContent=e.message;$("admin-correction-message").className="import-message error";}
+  });
   let debitNoteLines=[];
   function renderDebitNoteLines(){
     $("dn-lines").innerHTML=debitNoteLines.map((x,i)=>'<tr><td><select data-dn-account="'+i+'">'+adminOptions(x.sandi)+'</select></td><td><input data-dn-description="'+i+'" value="'+escapeHtml(x.description||"")+'"></td><td><input type="number" min="0" step="0.01" data-dn-debit="'+i+'" value="'+(x.debit||"")+'"></td><td><input type="number" min="0" step="0.01" data-dn-credit="'+i+'" value="'+(x.credit||"")+'"></td><td><button class="small-action danger" data-dn-remove="'+i+'">Hapus</button></td></tr>').join("");
