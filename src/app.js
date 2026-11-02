@@ -827,7 +827,7 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
       if(Number(payload.version)!==19||!payload.state||!Array.isArray(payload.state.accounts)||!Array.isArray(payload.state.journals))throw new Error("File bukan backup JSON SBP Accounting V19 yang dikenali.");
       const state=payload.state;
       pendingV19Migration={version:19,state,file_name:file.name};
-      $("v19-backup-summary").textContent="Backup V19 terbaca: "+state.accounts.length+" akun · "+state.journals.length+" jurnal · "+(state.openingBalances||[]).length+" saldo awal · "+(state.nptrans||[]).length+" baris NPTRANS";
+      $("v19-backup-summary").textContent="Backup V19 terbaca: "+state.accounts.length+" akun · "+state.journals.length+" jurnal · "+(state.openingBalances||[]).length+" saldo awal · "+(state.nptrans||[]).length+" baris NPTRANS · "+(state.debitNotes||[]).length+" Nota Debet · "+(state.annualBudgets||[]).length+" anggaran";
       $("v19-backup-detail").textContent="Data akan digabungkan ke V20. Data V20 yang sudah ada tidak dihapus. Jurnal dengan nomor bukti yang sudah digunakan akan dilewati. Pastikan backup asli tetap disimpan di lokasi terpisah.";
       $("v19-backup-review").hidden=false;
       $("v19-backup-confirm").disabled=false;
@@ -846,7 +846,7 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
     $("v19-backup-confirm").disabled=true;
     try{
       const result=await window.sbpDesktop.importV19Backup(pendingV19Migration);
-      $("v19-backup-message").textContent="Migrasi selesai: "+result.accountInserted+" akun baru, "+result.journalInserted+" jurnal masuk, "+result.journalSkipped+" jurnal dilewati, "+result.openingInserted+" saldo awal, "+result.nptransInserted+" baris NPTRANS.";
+      $("v19-backup-message").textContent="Migrasi selesai: "+result.accountInserted+" akun baru, "+result.journalInserted+" jurnal masuk, "+result.journalSkipped+" jurnal dilewati, "+result.openingInserted+" saldo awal, "+result.nptransInserted+" baris NPTRANS, "+result.debitNoteInserted+" Nota Debet, "+result.budgetInserted+" nilai anggaran. Template DBF: "+(result.templateImported?"ikut dimigrasikan":"tidak tersedia")+".");
       $("v19-backup-message").className="import-message success";
       pendingV19Migration=null;$("v19-backup-review").hidden=true;
       await refreshSummary();await loadAccounts();await loadOpeningBalances();await refreshNptransRows();await loadJournalList();
