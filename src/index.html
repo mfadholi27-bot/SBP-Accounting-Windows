@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SBP Accounting Windows V20</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand"><div class="mark">SBP</div><div><b>SBP Accounting</b><small>WINDOWS V20</small></div></div>
+  <p class="nav-caption">MENU UTAMA</p>
+  <a class="nav active">▦ <span>Dashboard</span></a>
+  <a class="nav">▤ <span>Master Akun</span></a>
+  <a class="nav">⇄ <span>Jurnal Maintenance</span></a>
+  <a class="nav">▣ <span>Saldo Awal ACC & Program</span></a>
+  <a class="nav">◷ <span>Anggaran per Akun</span></a>
+  <p class="nav-caption">LAPORAN</p>
+  <a class="nav">▥ <span>Buku Besar</span></a>
+  <a class="nav">▧ <span>Neraca Percobaan</span></a>
+  <a class="nav">▤ <span>Laporan Keuangan</span></a>
+  <div class="side-foot">DATABASE LOKAL <i></i></div>
+</aside>
+<main class="main">
+  <header class="top"><div><small>SISTEM PEMBUKUAN</small><h1>Dashboard</h1></div><div class="top-right"><span class="offline"><i></i> Offline</span><button id="backup">Buat Backup</button></div></header>
+  <section class="hero"><div><small>SELAMAT DATANG</small><h2>SBP Accounting Windows</h2><p>Aplikasi pembukuan desktop mandiri. Data tersimpan secara lokal di komputer ini.</p></div><strong>V20</strong></section>
+  <section class="stats">
+    <article><small>Total Akun</small><b id="accounts">0</b><span>Master akun terdaftar</span></article>
+    <article><small>Jurnal Draft</small><b id="drafts">0</b><span>Menunggu posting</span></article>
+    <article><small>Jurnal Posted</small><b id="posted">0</b><span>Transaksi dibukukan</span></article>
+    <article><small>Database</small><b class="active-db">AKTIF</b><span>SQLite lokal</span></article>
+  </section>
+  <section class="panel"><div class="panel-title"><div><h3>Status Pengembangan</h3><p>Fondasi desktop V20. Modul akuntansi akan ditambahkan setelah audit struktur V19.</p></div><label>TAHAP 1</label></div>
+    <div class="item"><i class="done">✓</i><div><b>Kerangka desktop Electron</b><small>Jendela aplikasi, preload, dan proses utama terpisah.</small></div><em>Fondasi tersedia</em></div>
+    <div class="item"><i class="done">✓</i><div><b>Database lokal SQLite</b><small>Database terpisah di profil pengguna Windows.</small></div><em>Fondasi tersedia</em></div>
+    <div class="item"><i>•</i><div><b>Migrasi data V19</b><small>Menunggu audit struktur dan format data sumber.</small></div><em>Belum dimulai</em></div>
+    <div class="item"><i>•</i><div><b>Pengujian Windows 7 x86/x64</b><small>Harus diuji pada VM/perangkat target; belum dinyatakan kompatibel.</small></div><em>Belum diuji</em></div>
+  </section>
+  <footer>SBP Accounting Windows V20 · Proyek mandiri · Tidak terhubung ke V19</footer>
+</main>
+<script src="app.js"></script>
+</body></html>
