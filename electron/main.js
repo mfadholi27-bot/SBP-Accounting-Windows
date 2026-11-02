@@ -573,6 +573,24 @@ ipcMain.handle("periods:reopen",(_e,p={})=>{
  db.run("UPDATE accounting_periods SET status='OPEN',opened_at=CURRENT_TIMESTAMP,close_note=? WHERE period_key=?",[reason,key]);audit("REOPEN_PERIOD","PERIOD",key,"Periode dibuka kembali: "+reason,old);saveDb();return {ok:true};
 });
 
+
+ipcMain.handle("journals:reverse",(_e,p={})=>{
+ const id=Number(p.id),voucher=String(p.voucher_number||"").trim(),date=String(p.journal_date||""),reason=String(p.reason||"").trim();
+ const source=rows("SELECT * FROM journal_headers WHERE id=?",[id])[0];if(!source||source.status!=="POSTED")throw new Error("Jurnal sumber tidak ditemukan atau belum POSTED.");
+ if(!voucher||!reason||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Nomor bukti, tanggal, dan alasan wajib diisi.");
+ if(periodIsClosed(date)||periodIsClosed(source.journal_date))throw new Error("Periode sumber atau periode pembalik sudah ditutup.");
+ if(rows("SELECT id FROM journal_headers WHERE voucher_number=?",[voucher]).length)throw new Error("Nomor bukti pembalik sudah digunakan.");
+ const lines=rows("SELECT * FROM journal_lines WHERE journal_id=? ORDER BY line_no",[id]);
+ db.run("BEGIN IMMEDIATE");try{
+  db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,source_type,source_id,source_voucher,split_from_id,posted_at) VALUES(?,?,?,'POSTED','REVERSAL',?,?,?,CURRENT_TIMESTAMP)",
+   [date,voucher,"PEMBALIK "+source.voucher_number+" · "+reason,String(id),source.voucher_number,id]);
+  const rid=db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+  const st=db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+  try{lines.forEach((x,i)=>st.run([rid,i+1,x.account_id,x.sandi,"Pembalik "+(x.description||""),x.credit,x.debit]));}finally{st.free();}
+  audit("CREATE_REVERSAL_JOURNAL","JOURNAL",rid,"Jurnal "+voucher+" membalik "+source.voucher_number);
+  db.run("COMMIT");saveDb();return {ok:true,id:rid};
+ }catch(e){db.run("ROLLBACK");throw e;}
+});
 ipcMain.handle("reports:trial-balance",(_e,p={})=>{
  const period=String(p.period_key||"");if(!/^\\d{4}-\\d{2}$/.test(period))throw new Error("Pilih periode YYYY-MM.");
  return rows(`SELECT a.sandi,a.account_name,a.normal_balance,
