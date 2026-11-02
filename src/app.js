@@ -946,6 +946,16 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
     catch(error){$("nptrans-message").textContent="Import gagal: "+error.message;$("nptrans-message").className="import-message error";}
   });
   $("nptrans-search").addEventListener("input",refreshNptransRows);
+  $("nptrans-create-drafts").addEventListener("click",async()=>{
+    if(!confirm("Bentuk Draft jurnal dari seluruh baris NPTRANS yang tersimpan? Nilai debit/kredit tetap nol dan harus dilengkapi manual sebelum posting."))return;
+    try{
+      const result=await window.sbpDesktop.createNptransDrafts({});
+      $("nptrans-message").textContent="Selesai: "+result.created+" Draft baru dibuat, "+result.linked+" kelompok sudah memiliki Draft. Lengkapi debit/kredit sebelum posting.";
+      $("nptrans-message").className="import-message success";
+      await refreshSummary();await loadJournalList();await refreshNptransRows();
+    }catch(error){$("nptrans-message").textContent="Gagal membentuk Draft: "+error.message;$("nptrans-message").className="import-message error";}
+  });
+
 
   $("account-import-file").addEventListener("change",e=>{selectedAccountFile=e.target.files[0]||null;$("account-import-file-name").textContent=selectedAccountFile?selectedAccountFile.name:"Belum ada file dipilih.";$("account-import-preview").disabled=!selectedAccountFile;$("account-import-review").hidden=true;pendingAccountBatch=null;});
   $("account-import-preview").addEventListener("click",async()=>{
