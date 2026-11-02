@@ -811,6 +811,13 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
     }
     const os=db.prepare("INSERT OR IGNORE INTO opening_balances(period_key,account_id,sandi,program_code,debit,credit,source_type,source_reference) VALUES(?,?,?,?,?,?,?,?)");
     try { for (const x of opening) { const code=String(x.accountCode ?? x.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?", [code])[0]; os.run([String(x.period ?? x.period_key),acc.id,code,String(x.program ?? x.program_code ?? ""),Number(x.debit||0),Number(x.credit||0),"V19_MIGRATION","Backup V19"]); if(db.getRowsModified()) openingInserted++; } } finally { os.free(); }
+    const budgets=Array.isArray(legacy.annualBudgets)?legacy.annualBudgets:[];
+    const bs=db.prepare("INSERT OR IGNORE INTO annual_budgets(fiscal_year,account_id,sandi,month_no,budget_amount,program_code,notes) VALUES(?,?,?,?,?,?,?)");
+    try { for(const b of budgets){ const year=Number(b.year ?? b.fiscal_year),code=String(b.accountCode ?? b.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[code])[0],monthly=Array.isArray(b.monthly)?b.monthly:(Array.isArray(b.months)?b.months:[]); if(!acc||!Number.isInteger(year)||monthly.length!==12) continue; monthly.forEach((amount,index)=>{const value=Number(amount||0);if(Number.isFinite(value)&&value>=0)bs.run([year,acc.id,code,index+1,value,String(b.programCode||""),String(b.notes||"")]);}); } } finally { bs.free(); }
+    if(legacy.npTemplate&&Array.isArray(legacy.npTemplate.fields)&&legacy.npTemplate.fields.length){
+      db.run("UPDATE nptrans_templates SET is_active=0");
+      db.run("INSERT INTO nptrans_templates(template_name,file_version,fields_json,is_active) VALUES(?,?,?,1)",["Template NPTRANS V19",Number(legacy.npTemplate.version||3),JSON.stringify(legacy.npTemplate.fields)]);
+    }
     const np=Array.isArray(legacy.nptrans)?legacy.nptrans:[];
     const ns=db.prepare("INSERT INTO nptrans_rows(sandi,transaction_date,voucher_number,row_number,description,amount,raw_json) VALUES(?,?,?,?,?,?,?)");
     try { for(const x of np) { const date=String(x.tanggal ?? x.transaction_date ?? ""); const iso=/^\d{4}-\d{2}-\d{2}$/.test(date)?date:(/^\d{8}$/.test(date)?date.slice(0,4)+"-"+date.slice(4,6)+"-"+date.slice(6,8):""); if(!iso) continue; ns.run([String(x.sandi||""),iso,String(x.nobukti ?? x.voucher_number ?? ""),String(x.nourut ?? x.row_number ?? ""),String(x.ket ?? x.description ?? ""),Number(x.jumlah ?? x.amount ?? 0),JSON.stringify(x)]); nptransInserted++; } } finally { ns.free(); }
