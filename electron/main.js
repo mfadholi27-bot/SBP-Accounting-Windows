@@ -46,9 +46,10 @@ function createWindow(){
   mainWindow=new BrowserWindow({width:1500,height:950,minWidth:1100,minHeight:700,show:false,backgroundColor:"#f8faf9",webPreferences:{preload:path.join(__dirname,"preload.js"),contextIsolation:true,nodeIntegration:false,sandbox:true}});
   mainWindow.loadFile(path.join(__dirname,"../src/v19/index.html"));
   mainWindow.once("ready-to-show",()=>mainWindow.show());
+  mainWindow.on("close",event=>{if(!quitting){event.preventDefault();quitting=true;automaticBackup().finally(()=>{if(mainWindow)mainWindow.destroy();});}});
   mainWindow.on("closed",()=>{mainWindow=null;});
 }
 const template=[{label:"File",submenu:[{label:"Backup Data Windows...",click:()=>mainWindow?.webContents.send("sbp:menu-backup")},{label:"Restore Backup...",click:()=>mainWindow?.webContents.send("sbp:menu-restore")},{type:"separator"},{role:"quit"}]},{label:"View",submenu:[{role:"reload"},{role:"toggleDevTools"},{type:"separator"},{role:"resetZoom"},{role:"zoomIn"},{role:"zoomOut"},{type:"separator"},{role:"togglefullscreen"}]}];
 app.whenReady().then(()=>{Menu.setApplicationMenu(Menu.buildFromTemplate(template));createWindow();app.on("activate",()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
-app.on("before-quit",event=>{if(quitting)return;event.preventDefault();quitting=true;automaticBackup().finally(()=>app.quit());});
+app.on("before-quit",event=>{if(quitting)return;event.preventDefault();quitting=true;automaticBackup().finally(()=>{if(mainWindow)mainWindow.destroy();else app.quit();});});
 app.on("window-all-closed",()=>{if(process.platform!=="darwin"&&!quitting)app.quit();});
