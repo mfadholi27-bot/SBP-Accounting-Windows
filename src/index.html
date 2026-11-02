@@ -60,8 +60,27 @@
     <p class="hint">Akun yang sudah digunakan dalam jurnal tidak dapat dihapus. Akun tersebut dapat dinonaktifkan agar riwayat transaksi tetap aman.</p>
   </section>
 
-  <section class="view" id="view-journal"><div class="placeholder panel"><span>⇄</span><h2>Jurnal Maintenance</h2><p>Ruang kerja input jurnal, validasi debit-kredit, penyimpanan draft, dan posting akan dibangun pada tahap modul jurnal.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
-  <section class="view" id="view-journal-list"><div class="placeholder panel"><span>☷</span><h2>Daftar Jurnal</h2><p>Daftar transaksi, filter periode, status draft/posted, dan tindakan koreksi terkontrol.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-journal">
+    <div class="toolbar"><div><h2>Input Jurnal</h2><p>Masukkan transaksi. Draft dapat disimpan sebelum diposting.</p></div><span class="module-state">MODUL AKTIF · TAHAP AWAL</span></div>
+    <div class="panel journal-form-panel">
+      <div class="journal-head-grid">
+        <div><label for="j-date">Tanggal Jurnal</label><input id="j-date" type="date"></div>
+        <div><label for="j-number">Nomor Bukti</label><input id="j-number" maxlength="60" placeholder="Contoh: JU-001/11/2026"></div>
+        <div class="journal-description-field"><label for="j-description">Keterangan Jurnal</label><input id="j-description" maxlength="500" placeholder="Uraian transaksi..."></div>
+      </div>
+      <div class="journal-lines-heading"><div><h3>Rincian Jurnal</h3><p>Setiap baris menggunakan satu sisi: Debit atau Kredit.</p></div><button type="button" class="secondary" id="add-journal-line">+ Tambah Baris</button></div>
+      <div class="table-wrap"><table class="data-table journal-entry-table"><thead><tr><th style="width:150px">SANDI AKUN</th><th>NAMA AKUN</th><th>KETERANGAN BARIS</th><th style="width:160px">DEBIT (Rp)</th><th style="width:160px">KREDIT (Rp)</th><th style="width:54px"></th></tr></thead><tbody id="journal-entry-rows"></tbody></table></div>
+      <div class="journal-total-grid"><div><small>TOTAL DEBIT</small><b id="journal-total-debit">Rp 0</b></div><div><small>TOTAL KREDIT</small><b id="journal-total-credit">Rp 0</b></div><div><small>SELISIH</small><b id="journal-total-diff">Rp 0</b></div></div>
+      <div id="journal-message" class="journal-message" role="status">Isi tanggal, nomor bukti, keterangan, dan minimal dua baris akun.</div>
+      <div class="journal-actions"><button type="button" class="secondary" id="reset-journal">Kosongkan Form</button><button type="button" class="secondary" id="save-journal-draft">Simpan Draft</button><button type="button" class="primary" id="post-journal">Posting Jurnal</button></div>
+    </div>
+  </section>
+  <section class="view" id="view-journal-list">
+    <div class="toolbar"><div><h2>Daftar Jurnal</h2><p>Draft dapat diedit atau dihapus. Jurnal POSTED tidak dapat diedit langsung.</p></div><button class="primary" id="new-journal">+ Jurnal Baru</button></div>
+    <div class="filterbar journal-filterbar"><input id="journal-search" type="search" placeholder="Cari nomor bukti atau keterangan..."><select id="journal-status"><option value="ALL">Semua Status</option><option value="DRAFT">Draft</option><option value="POSTED">Posted</option></select><input id="journal-from" type="date" aria-label="Dari tanggal"><input id="journal-to" type="date" aria-label="Sampai tanggal"><button type="button" class="secondary" id="filter-journals">Terapkan</button></div>
+    <div class="table-wrap"><table class="data-table journal-list-table"><thead><tr><th>TANGGAL</th><th>NOMOR BUKTI</th><th>KETERANGAN</th><th>STATUS</th><th>DEBIT</th><th>KREDIT</th><th>AKSI</th></tr></thead><tbody id="journal-list-rows"><tr><td colspan="7" class="empty">Memuat daftar jurnal...</td></tr></tbody></table></div>
+    <div class="journal-list-footer"><span id="journal-list-count">0 jurnal</span><span>Hanya jurnal POSTED yang kelak dihitung dalam laporan.</span></div>
+  </section>
   <section class="view" id="view-debit-notes"><div class="placeholder panel"><span>▤</span><h2>Nota Debet</h2><p>Pengelolaan nota debet dan keterkaitannya dengan jurnal.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
   <section class="view" id="view-opening-balances"><div class="placeholder panel"><span>▣</span><h2>Saldo Awal ACC & Program</h2><p>Saldo awal per SANDI akun, termasuk pratinjau impor dan pemeriksaan keseimbangan.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
   <section class="view" id="view-annual-budget"><div class="placeholder panel"><span>◷</span><h2>Anggaran Tahunan</h2><p>Anggaran per akun dan bulan, realisasi, serta sisa anggaran.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
