@@ -770,7 +770,7 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
   })).filter(j => j.voucher);
   const invalid = [];
   journals.forEach((j, i) => {
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(j.date)) invalid.push("Jurnal "+j.voucher+": tanggal tidak valid.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(j.date)) invalid.push("Jurnal "+j.voucher+": tanggal tidak valid.");
     if (!j.description) invalid.push("Jurnal "+j.voucher+": keterangan kosong.");
     if (j.lines.length < 2) invalid.push("Jurnal "+j.voucher+": kurang dari dua baris.");
     j.lines.forEach((line, n) => {
@@ -787,7 +787,7 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
   const opening = Array.isArray(legacy.openingBalances) ? legacy.openingBalances : [];
   opening.forEach((x,i) => {
     const period=String(x.period ?? x.period_key ?? ""), code=String(x.accountCode ?? x.sandi ?? "").trim();
-    if (!/^\\d{4}-\\d{2}$/.test(period)) invalid.push("Saldo awal baris "+(i+1)+": periode tidak valid.");
+    if (!/^\d{4}-\d{2}$/.test(period)) invalid.push("Saldo awal baris "+(i+1)+": periode tidak valid.");
     if (!accountCodes.has(code)) invalid.push("Saldo awal baris "+(i+1)+": SANDI "+code+" tidak ditemukan.");
   });
   if (invalid.length) throw new Error("Migrasi dibatalkan karena ada "+invalid.length+" masalah. Contoh: "+invalid.slice(0,8).join(" | "));
@@ -813,7 +813,7 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
     try { for (const x of opening) { const code=String(x.accountCode ?? x.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?", [code])[0]; os.run([String(x.period ?? x.period_key),acc.id,code,String(x.program ?? x.program_code ?? ""),Number(x.debit||0),Number(x.credit||0),"V19_MIGRATION","Backup V19"]); if(db.getRowsModified()) openingInserted++; } } finally { os.free(); }
     const np=Array.isArray(legacy.nptrans)?legacy.nptrans:[];
     const ns=db.prepare("INSERT INTO nptrans_rows(sandi,transaction_date,voucher_number,row_number,description,amount,raw_json) VALUES(?,?,?,?,?,?,?)");
-    try { for(const x of np) { const date=String(x.tanggal ?? x.transaction_date ?? ""); const iso=/^\\d{4}-\\d{2}-\\d{2}$/.test(date)?date:(/^\\d{8}$/.test(date)?date.slice(0,4)+"-"+date.slice(4,6)+"-"+date.slice(6,8):""); if(!iso) continue; ns.run([String(x.sandi||""),iso,String(x.nobukti ?? x.voucher_number ?? ""),String(x.nourut ?? x.row_number ?? ""),String(x.ket ?? x.description ?? ""),Number(x.jumlah ?? x.amount ?? 0),JSON.stringify(x)]); nptransInserted++; } } finally { ns.free(); }
+    try { for(const x of np) { const date=String(x.tanggal ?? x.transaction_date ?? ""); const iso=/^\d{4}-\d{2}-\d{2}$/.test(date)?date:(/^\d{8}$/.test(date)?date.slice(0,4)+"-"+date.slice(4,6)+"-"+date.slice(6,8):""); if(!iso) continue; ns.run([String(x.sandi||""),iso,String(x.nobukti ?? x.voucher_number ?? ""),String(x.nourut ?? x.row_number ?? ""),String(x.ket ?? x.description ?? ""),Number(x.jumlah ?? x.amount ?? 0),JSON.stringify(x)]); nptransInserted++; } } finally { ns.free(); }
     db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('MIGRATE_V19','MIGRATION',?)", ["Migrasi V19: "+accountInserted+" akun, "+journalInserted+" jurnal, "+openingInserted+" saldo awal, "+nptransInserted+" NPTRANS; "+journalSkipped+" jurnal dilewati karena nomor bukti sudah ada."]);
     db.run("COMMIT");
   } catch(error) { db.run("ROLLBACK"); throw error; }
