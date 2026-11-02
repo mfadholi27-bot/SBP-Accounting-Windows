@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("sbpDesktop", {
   importAccounts: (payload) => ipcRenderer.invoke("imports:accounts", payload),
   listNptrans: (filters) => ipcRenderer.invoke("nptrans:list", filters),
   importNptrans: (payload) => ipcRenderer.invoke("nptrans:import", payload),
+  createNptransDrafts: (payload) => ipcRenderer.invoke("nptrans:create-drafts", payload),
   importOpeningBalances: (payload) => ipcRenderer.invoke("imports:opening-balances", payload),
   listOpeningBalances: (period) => ipcRenderer.invoke("opening:list", period),
   saveOpeningBalance: (payload) => ipcRenderer.invoke("opening:save", payload),
