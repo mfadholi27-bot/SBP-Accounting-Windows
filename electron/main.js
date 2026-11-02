@@ -791,7 +791,7 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
     if (!accountCodes.has(code)) invalid.push("Saldo awal baris "+(i+1)+": SANDI "+code+" tidak ditemukan.");
   });
   if (invalid.length) throw new Error("Migrasi dibatalkan karena ada "+invalid.length+" masalah. Contoh: "+invalid.slice(0,8).join(" | "));
-  let accountInserted=0,journalInserted=0,journalSkipped=0,openingInserted=0,nptransInserted=0;
+  let accountInserted=0,journalInserted=0,journalSkipped=0,openingInserted=0,nptransInserted=0,debitNoteInserted=0,budgetInserted=0,templateImported=false;
   db.run("BEGIN IMMEDIATE");
   try {
     for (const a of accounts) {
@@ -819,25 +819,25 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
       const linked=rows("SELECT id FROM journal_headers WHERE voucher_number=?",[number])[0];
       db.run("INSERT INTO debit_notes(note_number,note_date,note_type,partner_name,invoice_reference,description,status,linked_journal_id,posted_at,cancelled_at,cancel_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         [number,date,String(n.kind||""),partner,String(n.reference||""),description,status,linked?linked.id:null,n.postedAt||null,n.cancelledAt||null,n.cancelReason||null]);
-      const noteId=db.exec("SELECT last_insert_rowid()")[0].values[0][0], lines=Array.isArray(n.lines)?n.lines:[];
+      const noteId=db.exec("SELECT last_insert_rowid()")[0].values[0][0], lines=Array.isArray(n.lines)?n.lines:[]; debitNoteInserted++;
       const ds=db.prepare("INSERT INTO debit_note_lines(debit_note_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
       try{lines.forEach((line,index)=>{const code=String(line.code||"").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[code])[0];if(acc)ds.run([noteId,index+1,acc.id,code,String(line.note||""),Number(line.debit||0),Number(line.credit||0)]);});}finally{ds.free();}
     }
     const budgets=Array.isArray(legacy.annualBudgets)?legacy.annualBudgets:[];
     const bs=db.prepare("INSERT OR IGNORE INTO annual_budgets(fiscal_year,account_id,sandi,month_no,budget_amount,program_code,notes) VALUES(?,?,?,?,?,?,?)");
-    try { for(const b of budgets){ const year=Number(b.year ?? b.fiscal_year),code=String(b.accountCode ?? b.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[code])[0],monthly=Array.isArray(b.monthly)?b.monthly:(Array.isArray(b.months)?b.months:[]); if(!acc||!Number.isInteger(year)||monthly.length!==12) continue; monthly.forEach((amount,index)=>{const value=Number(amount||0);if(Number.isFinite(value)&&value>=0)bs.run([year,acc.id,code,index+1,value,String(b.programCode||""),String(b.notes||"")]);}); } } finally { bs.free(); }
+    try { for(const b of budgets){ const year=Number(b.year ?? b.fiscal_year),code=String(b.accountCode ?? b.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[code])[0],monthly=Array.isArray(b.monthly)?b.monthly:(Array.isArray(b.months)?b.months:[]); if(!acc||!Number.isInteger(year)||monthly.length!==12) continue; monthly.forEach((amount,index)=>{const value=Number(amount||0);if(Number.isFinite(value)&&value>=0){bs.run([year,acc.id,code,index+1,value,String(b.programCode||""),String(b.notes||"")]);if(db.getRowsModified())budgetInserted++;}}); } } finally { bs.free(); }
     if(legacy.npTemplate&&Array.isArray(legacy.npTemplate.fields)&&legacy.npTemplate.fields.length){
       db.run("UPDATE nptrans_templates SET is_active=0");
-      db.run("INSERT INTO nptrans_templates(template_name,file_version,fields_json,is_active) VALUES(?,?,?,1)",["Template NPTRANS V19",Number(legacy.npTemplate.version||3),JSON.stringify(legacy.npTemplate.fields)]);
+      db.run("INSERT INTO nptrans_templates(template_name,file_version,fields_json,is_active) VALUES(?,?,?,1)",["Template NPTRANS V19",Number(legacy.npTemplate.version||3),JSON.stringify(legacy.npTemplate.fields)]); templateImported=true;
     }
     const np=Array.isArray(legacy.nptrans)?legacy.nptrans:[];
     const ns=db.prepare("INSERT INTO nptrans_rows(sandi,transaction_date,voucher_number,row_number,description,amount,raw_json) VALUES(?,?,?,?,?,?,?)");
     try { for(const x of np) { const date=String(x.tanggal ?? x.transaction_date ?? ""); const iso=/^\d{4}-\d{2}-\d{2}$/.test(date)?date:(/^\d{8}$/.test(date)?date.slice(0,4)+"-"+date.slice(4,6)+"-"+date.slice(6,8):""); if(!iso) continue; ns.run([String(x.sandi||""),iso,String(x.nobukti ?? x.voucher_number ?? ""),String(x.nourut ?? x.row_number ?? ""),String(x.ket ?? x.description ?? ""),Number(x.jumlah ?? x.amount ?? 0),JSON.stringify(x)]); nptransInserted++; } } finally { ns.free(); }
-    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('MIGRATE_V19','MIGRATION',?)", ["Migrasi V19: "+accountInserted+" akun, "+journalInserted+" jurnal, "+openingInserted+" saldo awal, "+nptransInserted+" NPTRANS; "+journalSkipped+" jurnal dilewati karena nomor bukti sudah ada."]);
+    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('MIGRATE_V19','MIGRATION',?)", ["Migrasi V19: "+accountInserted+" akun, "+journalInserted+" jurnal, "+openingInserted+" saldo awal, "+nptransInserted+" NPTRANS, "+debitNoteInserted+" nota debet, "+budgetInserted+" anggaran; "+journalSkipped+" jurnal dilewati karena nomor bukti sudah ada."]);
     db.run("COMMIT");
   } catch(error) { db.run("ROLLBACK"); throw error; }
   saveDb();
-  return {ok:true,accountInserted,journalInserted,journalSkipped,openingInserted,nptransInserted};
+  return {ok:true,accountInserted,journalInserted,journalSkipped,openingInserted,nptransInserted,debitNoteInserted,budgetInserted,templateImported};
 });
 
 ipcMain.handle("db:restore",async()=>{
