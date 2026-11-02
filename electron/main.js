@@ -814,7 +814,7 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
     const notes=Array.isArray(legacy.debitNotes)?legacy.debitNotes:[];
     for(const n of notes){
       const number=String(n.number||"").trim(),date=String(n.date||"").slice(0,10),partner=String(n.partner||"").trim(),description=String(n.description||"").trim();
-      if(!number||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!partner||!description||rows("SELECT id FROM debit_notes WHERE note_number=?",[number]).length) continue;
+      if(!number||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!partner||!description||rows("SELECT id FROM debit_notes WHERE note_number=?",[number]).length) continue;
       const status=n.status==="posted"?"POSTED":n.status==="cancelled"?"CANCELLED":"DRAFT";
       const linked=rows("SELECT id FROM journal_headers WHERE voucher_number=?",[number])[0];
       db.run("INSERT INTO debit_notes(note_number,note_date,note_type,partner_name,invoice_reference,description,status,linked_journal_id,posted_at,cancelled_at,cancel_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
