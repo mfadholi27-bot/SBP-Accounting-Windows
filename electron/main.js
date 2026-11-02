@@ -749,6 +749,45 @@ ipcMain.handle("archive:read",async(_e,p={})=>{
  return {ok:true,verified:Boolean(record&&record.metadata_json&&JSON.parse(record.metadata_json).sha256),metadata:{createdAt:data.createdAt,dateFrom:data.dateFrom,dateTo:data.dateTo,journalCount:data.journals.length,journalLineCount:journalLines,accountCount:(data.accounts||[]).length},data};
 });
 
+ipcMain.handle("nptrans:create-drafts", (_event, payload = {}) => {
+  const selected=Array.isArray(payload.ids)?payload.ids.map(Number).filter(Number.isFinite):[];
+  const all=selected.length?rows("SELECT * FROM nptrans_rows WHERE id IN ("+selected.map(()=>"?").join(",")+")",selected):rows("SELECT * FROM nptrans_rows ORDER BY transaction_date,voucher_number,row_number");
+  if(!all.length)throw new Error("Tidak ada baris NPTRANS untuk dibentuk menjadi Draft.");
+  const groups=new Map(),unknown=new Set();
+  all.forEach(row=>{
+    const date=String(row.transaction_date||""),voucher=String(row.voucher_number||"").trim(),sandi=String(row.sandi||"").trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!voucher)throw new Error("Tanggal atau nomor bukti NPTRANS tidak valid pada baris ID "+row.id+".");
+    const acc=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi])[0];if(!acc)unknown.add(sandi);
+    const key=date+"|"+voucher;if(!groups.has(key))groups.set(key,{date,voucher,lines:[],ids:[]});
+    groups.get(key).lines.push({sandi,account_id:acc?acc.id:null,description:String(row.description||"")+" | JUMLAH sumber: "+Number(row.amount||0),debit:0,credit:0});
+    groups.get(key).ids.push(row.id);
+  });
+  if(unknown.size)throw new Error("SANDI berikut belum ada/aktif di Master Akun: "+[...unknown].slice(0,15).join(", ")+". Perbaiki Master Akun sebelum membuat Draft.");
+  let created=0,linked=0;
+  db.run("BEGIN IMMEDIATE");
+  try{
+    for(const g of groups.values()){
+      const prior=rows("SELECT id FROM journal_headers WHERE source_type='NPTRANS' AND journal_date=? AND source_voucher=? AND status='DRAFT'",[g.date,g.voucher])[0];
+      let jid;
+      if(prior){jid=prior.id;linked++;}
+      else{
+        const number="NP-"+g.date.replace(/-/g,"")+"-"+String(created+1).padStart(4,"0");
+        if(rows("SELECT id FROM journal_headers WHERE voucher_number=?",[number]).length)throw new Error("Nomor Draft otomatis "+number+" sudah digunakan.");
+        db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,source_type,source_voucher,created_at) VALUES(?,?,?,'DRAFT','NPTRANS',?,CURRENT_TIMESTAMP)",[g.date,number,"Import NPTRANS · "+g.voucher,g.voucher]);
+        jid=db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+        const st=db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,0,0)");
+        try{g.lines.forEach((line,i)=>st.run([jid,i+1,line.account_id,line.sandi,line.description]));}finally{st.free();}
+        created++;
+      }
+      const up=db.prepare("UPDATE nptrans_rows SET journal_id=? WHERE id=?");
+      try{g.ids.forEach(id=>up.run([jid,id]));}finally{up.free();}
+    }
+    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('CREATE_NPTRANS_DRAFTS','JOURNAL',?)",["NPTRANS membentuk "+created+" Draft baru; "+linked+" kelompok sudah memiliki Draft."]);
+    db.run("COMMIT");
+  }catch(error){db.run("ROLLBACK");throw error;}
+  saveDb();return {ok:true,created,linked,groups:groups.size};
+});
+
 ipcMain.handle("journals:import-bulk", (_event, payload = {}) => {
   const groups=Array.isArray(payload.groups)?payload.groups:[];
   if(!groups.length)throw new Error("Tidak ada kelompok jurnal untuk diimpor.");
