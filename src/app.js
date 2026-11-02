@@ -898,12 +898,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadOpeningBalances().catch(()=>{});
 
   $("dn-date").value=new Date().toISOString().slice(0,10);
-  addDebitNoteLine();addDebitNoteLine();
   $("period-key").value=new Date().toISOString().slice(0,7);
   $("report-period").value=new Date().toISOString().slice(0,7);
   $("admin-reversal-date").value=new Date().toISOString().slice(0,10);
   $("archive-from").value=new Date().getFullYear()+"-01-01";
   $("archive-to").value=new Date().toISOString().slice(0,10);
   await loadAdminModules();
+  addDebitNoteLine();addDebitNoteLine();
   await refreshSummary();
 });
