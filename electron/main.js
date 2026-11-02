@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const initSqlJs = require("sql.js");
 
 let db;
@@ -561,9 +562,16 @@ ipcMain.handle("periods:close",(_e,p={})=>{
  COALESCE(SUM(j.debit),0) debit,COALESCE(SUM(j.credit),0) credit
  FROM accounts a LEFT JOIN opening_balances o ON o.sandi=a.sandi AND o.period_key=?
  LEFT JOIN (SELECT l.sandi,SUM(l.debit) debit,SUM(l.credit) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE substr(h.journal_date,1,7)=? AND h.status='POSTED' GROUP BY l.sandi) j ON j.sandi=a.sandi`,[key,key]);
- const sum=rows(`SELECT COALESCE(SUM(debit),0) debit,COALESCE(SUM(credit),0) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE substr(h.journal_date,1,7)=? AND h.status='POSTED'`,[key])[0];
- if(Math.abs(Number(sum.debit)-Number(sum.credit))>0.005)throw new Error("Mutasi jurnal tidak seimbang. Periode tidak dapat ditutup.");
- const snap={period:key,postedJournalCount:Number(rows("SELECT COUNT(*) total FROM journal_headers WHERE substr(journal_date,1,7)=? AND status='POSTED'",[key])[0].total),debit:Number(sum.debit),credit:Number(sum.credit),closedAt:new Date().toISOString()};
+ const balances=rows(`SELECT a.sandi,
+ COALESCE(o.debit,0)-COALESCE(o.credit,0)+COALESCE(m.debit,0)-COALESCE(m.credit,0) net
+ FROM accounts a
+ LEFT JOIN (SELECT sandi,SUM(debit) debit,SUM(credit) credit FROM opening_balances WHERE period_key=? GROUP BY sandi) o ON o.sandi=a.sandi
+ LEFT JOIN (SELECT l.sandi,SUM(l.debit) debit,SUM(l.credit) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE substr(h.journal_date,1,7)=? AND h.status='POSTED' GROUP BY l.sandi) m ON m.sandi=a.sandi
+ WHERE a.is_active=1`,[key,key]);
+ const endingDebit=balances.reduce((s,x)=>s+Math.max(0,Number(x.net||0)),0);
+ const endingCredit=balances.reduce((s,x)=>s+Math.max(0,-Number(x.net||0)),0);
+ if(Math.abs(endingDebit-endingCredit)>0.005)throw new Error("Neraca Percobaan saldo akhir belum seimbang. Debit "+endingDebit+" · Kredit "+endingCredit+". Periode tidak dapat ditutup.");
+ const snap={period:key,postedJournalCount:Number(rows("SELECT COUNT(*) total FROM journal_headers WHERE substr(journal_date,1,7)=? AND status='POSTED'",[key])[0].total),endingDebit,endingCredit,closedAt:new Date().toISOString()};
  db.run("INSERT INTO accounting_periods(period_key,status,is_active,closed_at,closed_by,close_note,close_snapshot_json) VALUES(?,'CLOSED',0,CURRENT_TIMESTAMP,'LOCAL_USER',?,?) ON CONFLICT(period_key) DO UPDATE SET status='CLOSED',is_active=0,closed_at=CURRENT_TIMESTAMP,closed_by='LOCAL_USER',close_note=excluded.close_note,close_snapshot_json=excluded.close_snapshot_json",[key,note,JSON.stringify(snap)]);
  audit("CLOSE_PERIOD","PERIOD",key,"Periode "+key+" ditutup",null,snap);saveDb();return {ok:true,snapshot:snap};
 });
@@ -578,7 +586,7 @@ ipcMain.handle("journals:reverse",(_e,p={})=>{
  const id=Number(p.id),voucher=String(p.voucher_number||"").trim(),date=String(p.journal_date||""),reason=String(p.reason||"").trim();
  const source=rows("SELECT * FROM journal_headers WHERE id=?",[id])[0];if(!source||source.status!=="POSTED")throw new Error("Jurnal sumber tidak ditemukan atau belum POSTED.");
  if(!voucher||!reason||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Nomor bukti, tanggal, dan alasan wajib diisi.");
- if(periodIsClosed(date)||periodIsClosed(source.journal_date))throw new Error("Periode sumber atau periode pembalik sudah ditutup.");
+ if(periodIsClosed(date))throw new Error("Periode pembalik sudah ditutup.");
  if(rows("SELECT id FROM journal_headers WHERE voucher_number=?",[voucher]).length)throw new Error("Nomor bukti pembalik sudah digunakan.");
  const lines=rows("SELECT * FROM journal_lines WHERE journal_id=? ORDER BY line_no",[id]);
  db.run("BEGIN IMMEDIATE");try{
@@ -641,8 +649,8 @@ ipcMain.handle("archive:create",(_e,p={})=>{
  const from=String(p.date_from||""),to=String(p.date_to||"");if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal arsip tidak valid.");
  const data={version:1,createdAt:new Date().toISOString(),dateFrom:from,dateTo:to,accounts:rows("SELECT * FROM accounts"),journals:rows("SELECT * FROM journal_headers WHERE journal_date BETWEEN ? AND ?",[from,to]).map(h=>({...h,lines:rows("SELECT * FROM journal_lines WHERE journal_id=?",[h.id])})),openingBalances:rows("SELECT * FROM opening_balances WHERE period_key BETWEEN ? AND ?",[from.slice(0,7),to.slice(0,7)]),budgets:rows("SELECT * FROM annual_budgets WHERE fiscal_year BETWEEN ? AND ?",[Number(from.slice(0,4)),Number(to.slice(0,4))]),debitNotes:rows("SELECT * FROM debit_notes WHERE note_date BETWEEN ? AND ?",[from,to]),audit:rows("SELECT * FROM audit_logs WHERE substr(occurred_at,1,10) BETWEEN ? AND ?",[from,to])};
  const choice=dialog.showSaveDialogSync({title:"Simpan Arsip SBP Accounting",defaultPath:"SBP-Archive-"+from+"-"+to+".json",filters:[{name:"SBP Archive",extensions:["json"]}]});if(!choice)return {canceled:true};
- fs.writeFileSync(choice,JSON.stringify(data,null,2),"utf8");const count=data.journals.length;
- db.run("INSERT INTO archive_records(archive_name,period_start,period_end,file_path,record_count,metadata_json) VALUES(?,?,?,?,?,?)",["SBP Archive "+from+"-"+to,from,to,choice,count,JSON.stringify({journals:count,accounts:data.accounts.length})]);
+ const archiveText=JSON.stringify(data,null,2);fs.writeFileSync(choice,archiveText,"utf8");const checksum=crypto.createHash("sha256").update(archiveText,"utf8").digest("hex");const count=data.journals.length;
+ db.run("INSERT INTO archive_records(archive_name,period_start,period_end,file_path,record_count,metadata_json) VALUES(?,?,?,?,?,?)",["SBP Archive "+from+"-"+to,from,to,choice,count,JSON.stringify({journals:count,accounts:data.accounts.length,sha256:checksum})]);
  audit("CREATE_ARCHIVE","ARCHIVE",choice,"Arsip "+from+" s.d. "+to+" dibuat.");saveDb();return {ok:true,path:choice,recordCount:count};
 });
 ipcMain.handle("archive:list",()=>rows("SELECT * FROM archive_records ORDER BY created_at DESC"));
