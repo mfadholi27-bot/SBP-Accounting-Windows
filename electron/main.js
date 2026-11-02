@@ -83,7 +83,7 @@ function createAutomaticBackup(force=false) {
   const temp=target+".tmp";
   fs.copyFileSync(dbPath,temp);
   fs.renameSync(temp,target);
-  const files=fs.readdirSync(dir).filter(x=>/^SBP-Auto-\\d{4}-\\d{2}-\\d{2}\\.db$/.test(x)).sort().reverse();
+  const files=fs.readdirSync(dir).filter(x=>/^SBP-Auto-\d{4}-\d{2}-\d{2}\.db$/.test(x)).sort().reverse();
   files.slice(30).forEach(name=>{try{fs.unlinkSync(path.join(dir,name));}catch(_){}});
   return {created:true,path:target,retained:Math.min(files.length+1,30)};
 }
@@ -225,7 +225,7 @@ ipcMain.handle("journals:save", (_event, payload = {}) => {
   const description = String(payload.description || "").trim();
   const status = String(payload.status || "DRAFT").toUpperCase();
   const linesInput = Array.isArray(payload.lines) ? payload.lines : [];
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) throw new Error("Tanggal jurnal tidak valid.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Tanggal jurnal tidak valid.");
   if (!voucher || voucher.length > 60) throw new Error("Nomor bukti wajib diisi (maksimal 60 karakter).");
   if (!description) throw new Error("Keterangan jurnal wajib diisi.");
   if (!["DRAFT", "POSTED"].includes(status)) throw new Error("Status jurnal tidak valid.");
@@ -425,7 +425,7 @@ ipcMain.handle("nptrans:import", (_event, payload = {}) => {
   const mode=String(payload.mode||"merge");
   if(!items.length)throw new Error("Tidak ada baris NPTRANS yang valid.");
   if(!["merge","append","replace"].includes(mode))throw new Error("Mode import tidak dikenal.");
-  for(const item of items){const date=String(item.transaction_date||"");if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Tanggal NPTRANS tidak valid pada baris "+String(item.source_row_no||"?")+".");const period=rows("SELECT status FROM accounting_periods WHERE period_key=?",[date.slice(0,7)]);if(period.length&&period[0].status==="CLOSED")throw new Error("Import diblokir: periode "+date.slice(0,7)+" sudah ditutup.");}
+  for(const item of items){const date=String(item.transaction_date||"");if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error("Tanggal NPTRANS tidak valid pada baris "+String(item.source_row_no||"?")+".");const period=rows("SELECT status FROM accounting_periods WHERE period_key=?",[date.slice(0,7)]);if(period.length&&period[0].status==="CLOSED")throw new Error("Import diblokir: periode "+date.slice(0,7)+" sudah ditutup.");}
   const importName=String(payload.file_name||"NPTRANS import");
   const hash=String(payload.source_hash||"");
   let inserted=0,skipped=0;
@@ -465,7 +465,7 @@ ipcMain.handle("imports:opening-balances", (_event, payload = {}) => {
     try{
       for(const x of items){
         const period=String(x.period_key||""),sandi=String(x.sandi||"").trim();
-        if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)||!sandi) {skipped++;continue;}
+        if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)||!sandi) {skipped++;continue;}
         const closed=rows("SELECT status FROM accounting_periods WHERE period_key=?",[period]);if(closed.length&&closed[0].status==="CLOSED")throw new Error("Periode "+period+" sudah ditutup; saldo awal tidak diimpor.");
         const acc=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi]);
         if(!acc.length)throw new Error("SANDI "+sandi+" tidak ditemukan atau tidak aktif.");
@@ -497,7 +497,7 @@ ipcMain.handle("opening:save", (_event, payload = {}) => {
   const sandi=String(payload.sandi||"").trim();
   const program=String(payload.program_code||"").trim();
   const debit=Number(payload.debit||0),credit=Number(payload.credit||0);
-  if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period))throw new Error("Periode saldo awal tidak valid.");
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(period))throw new Error("Periode saldo awal tidak valid.");
   if(!sandi)throw new Error("SANDI akun wajib dipilih.");
   if(!Number.isFinite(debit)||!Number.isFinite(credit)||debit<0||credit<0||(debit>0&&credit>0)||(!(debit>0)&&!(credit>0)))throw new Error("Isi salah satu nilai debit atau kredit yang positif.");
   const account=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi]);
@@ -527,7 +527,7 @@ ipcMain.handle("debit-notes:list",(_e,filters={})=>{
 ipcMain.handle("debit-notes:save",(_e,p={})=>{
  const id=Number(p.id||0),number=String(p.note_number||"").trim(),date=String(p.note_date||""),partner=String(p.partner_name||"").trim(),description=String(p.description||"").trim();
  const linesIn=Array.isArray(p.lines)?p.lines:[];
- if(!number||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!partner||!description||linesIn.length<2)throw new Error("Nomor, tanggal, mitra, uraian, dan minimal dua baris wajib diisi.");
+ if(!number||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!partner||!description||linesIn.length<2)throw new Error("Nomor, tanggal, mitra, uraian, dan minimal dua baris wajib diisi.");
  if(periodIsClosed(date))throw new Error("Periode nota debet sudah ditutup.");
  const old=id?rows("SELECT * FROM debit_notes WHERE id=?",[id])[0]:null;
  if(id&&(!old||old.status!=="DRAFT"))throw new Error("Nota yang sudah POSTED/CANCELLED tidak dapat diedit.");
@@ -570,12 +570,12 @@ ipcMain.handle("debit-notes:cancel",(_e,p={})=>{
 
 ipcMain.handle("periods:list",()=>rows("SELECT * FROM accounting_periods ORDER BY period_key DESC"));
 ipcMain.handle("periods:open",(_e,p={})=>{
- const key=String(p.period_key||"");if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(key))throw new Error("Periode harus YYYY-MM.");
+ const key=String(p.period_key||"");if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(key))throw new Error("Periode harus YYYY-MM.");
  db.run("INSERT INTO accounting_periods(period_key,status,is_active,opened_at) VALUES(?,'OPEN',1,CURRENT_TIMESTAMP) ON CONFLICT(period_key) DO UPDATE SET status=CASE WHEN status='CLOSED' THEN status ELSE 'OPEN' END,is_active=1,opened_at=COALESCE(opened_at,CURRENT_TIMESTAMP)");
  db.run("UPDATE accounting_periods SET is_active=0 WHERE period_key<>?",[key]);audit("OPEN_PERIOD","PERIOD",key,"Periode "+key+" dibuka");saveDb();return {ok:true};
 });
 ipcMain.handle("periods:close",(_e,p={})=>{
- const key=String(p.period_key||""),note=String(p.note||"").trim();if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(key))throw new Error("Periode tidak valid.");
+ const key=String(p.period_key||""),note=String(p.note||"").trim();if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(key))throw new Error("Periode tidak valid.");
  const drafts=rows("SELECT COUNT(*) total FROM journal_headers WHERE substr(journal_date,1,7)=? AND status='DRAFT'",[key])[0].total;
  if(drafts)throw new Error("Tidak dapat menutup periode: masih ada "+drafts+" jurnal Draft.");
  const tb=rows(`SELECT COALESCE(SUM(o.debit-o.credit),0) opening,
@@ -606,7 +606,7 @@ ipcMain.handle("periods:reopen",(_e,p={})=>{
 ipcMain.handle("journals:correction-draft",(_e,p={})=>{
  const id=Number(p.id),voucher=String(p.voucher_number||"").trim(),date=String(p.journal_date||"");
  const source=rows("SELECT * FROM journal_headers WHERE id=?",[id])[0];if(!source||source.status!=="POSTED")throw new Error("Jurnal sumber harus berstatus POSTED.");
- if(!voucher||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Nomor bukti dan tanggal koreksi wajib diisi.");
+ if(!voucher||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error("Nomor bukti dan tanggal koreksi wajib diisi.");
  if(periodIsClosed(date))throw new Error("Periode koreksi sudah ditutup.");
  if(rows("SELECT id FROM journal_headers WHERE voucher_number=?",[voucher]).length)throw new Error("Nomor bukti koreksi sudah digunakan.");
  const lines=rows("SELECT * FROM journal_lines WHERE journal_id=? ORDER BY line_no",[id]);
@@ -623,7 +623,7 @@ ipcMain.handle("journals:correction-draft",(_e,p={})=>{
 ipcMain.handle("journals:reverse",(_e,p={})=>{
  const id=Number(p.id),voucher=String(p.voucher_number||"").trim(),date=String(p.journal_date||""),reason=String(p.reason||"").trim();
  const source=rows("SELECT * FROM journal_headers WHERE id=?",[id])[0];if(!source||source.status!=="POSTED")throw new Error("Jurnal sumber tidak ditemukan atau belum POSTED.");
- if(!voucher||!reason||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Nomor bukti, tanggal, dan alasan wajib diisi.");
+ if(!voucher||!reason||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error("Nomor bukti, tanggal, dan alasan wajib diisi.");
  if(periodIsClosed(date))throw new Error("Periode pembalik sudah ditutup.");
  if(rows("SELECT id FROM journal_headers WHERE voucher_number=?",[voucher]).length)throw new Error("Nomor bukti pembalik sudah digunakan.");
  const lines=rows("SELECT * FROM journal_lines WHERE journal_id=? ORDER BY line_no",[id]);
@@ -638,7 +638,7 @@ ipcMain.handle("journals:reverse",(_e,p={})=>{
  }catch(e){db.run("ROLLBACK");throw e;}
 });
 ipcMain.handle("reports:trial-balance",(_e,p={})=>{
- const period=String(p.period_key||"");if(!/^\\d{4}-\\d{2}$/.test(period))throw new Error("Pilih periode YYYY-MM.");
+ const period=String(p.period_key||"");if(!/^\d{4}-\d{2}$/.test(period))throw new Error("Pilih periode YYYY-MM.");
  return rows(`SELECT a.sandi,a.account_name,a.normal_balance,
  COALESCE(o.debit,0) opening_debit,COALESCE(o.credit,0) opening_credit,
  COALESCE(m.debit,0) movement_debit,COALESCE(m.credit,0) movement_credit,
@@ -654,7 +654,7 @@ ipcMain.handle("reports:trial-balance",(_e,p={})=>{
 ipcMain.handle("reports:ledger",(_e,p={})=>{
  const sandi=String(p.sandi||"").trim(),from=String(p.date_from||"0000-01-01"),to=String(p.date_to||"9999-12-31");
  if(!sandi)throw new Error("Pilih SANDI akun.");
- if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal Buku Besar tidak valid.");
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal Buku Besar tidak valid.");
  const opening=Number(rows("SELECT COALESCE(SUM(debit-credit),0) net FROM opening_balances WHERE sandi=? AND period_key<=?",[sandi,from.slice(0,7)])[0].net||0);
  const before=Number(rows("SELECT COALESCE(SUM(l.debit-l.credit),0) net FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE l.sandi=? AND h.status='POSTED' AND h.journal_date<?",[sandi,from])[0].net||0);
  const tx=rows(`SELECT h.journal_date,h.voucher_number,h.description journal_description,l.description line_description,l.debit,l.credit,h.id,l.line_no
@@ -672,7 +672,7 @@ ipcMain.handle("reports:income-summary",(_e,p={})=>{
 
 ipcMain.handle("reports:income-statement",(_e,p={})=>{
  const from=String(p.date_from||""),to=String(p.date_to||"");
- if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal laporan laba rugi tidak valid.");
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal laporan laba rugi tidak valid.");
  const rowsOut=rows(`SELECT a.sandi,a.account_name,a.account_type,a.normal_balance,
  COALESCE(SUM(l.debit),0) debit,COALESCE(SUM(l.credit),0) credit
  FROM accounts a JOIN journal_lines l ON l.sandi=a.sandi JOIN journal_headers h ON h.id=l.journal_id
@@ -685,7 +685,7 @@ ipcMain.handle("reports:income-statement",(_e,p={})=>{
 });
 ipcMain.handle("reports:balance-sheet",(_e,p={})=>{
  const date=String(p.as_of||"");
- if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Tanggal posisi neraca tidak valid.");
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error("Tanggal posisi neraca tidak valid.");
  const rowsOut=rows(`SELECT a.sandi,a.account_name,a.account_type,a.normal_balance,
  COALESCE(o.debit,0) opening_debit,COALESCE(o.credit,0) opening_credit,
  COALESCE(m.debit,0) movement_debit,COALESCE(m.credit,0) movement_credit
@@ -706,7 +706,7 @@ ipcMain.handle("audit:export",async(_e,p={})=>{
  const csv=["WAKTU,PELAKU,AKSI,ENTITAS,ID ENTITAS,RINGKASAN,SEBELUM,SESUDAH,KORELASI",...items.map(x=>[x.occurred_at,x.actor,x.action,x.entity_type,x.entity_id,x.summary,x.before_json,x.after_json,x.correlation_id].map(csvCell).join(","))].join("\r\n");
  const choice=await dialog.showSaveDialog({title:"Ekspor Audit Log",defaultPath:"SBP-Audit-"+new Date().toISOString().slice(0,10)+".csv",filters:[{name:"CSV",extensions:["csv"]}]});
  if(choice.canceled||!choice.filePath)return {canceled:true};
- fs.writeFileSync(choice.filePath,"\\uFEFF"+csv,"utf8");audit("EXPORT_AUDIT","AUDIT",choice.filePath,"Ekspor "+items.length+" baris audit.");saveDb();return {ok:true,count:items.length,path:choice.filePath};
+ fs.writeFileSync(choice.filePath,"\uFEFF"+csv,"utf8");audit("EXPORT_AUDIT","AUDIT",choice.filePath,"Ekspor "+items.length+" baris audit.");saveDb();return {ok:true,count:items.length,path:choice.filePath};
 });
 
 ipcMain.handle("validation:run",()=>{
@@ -726,7 +726,7 @@ ipcMain.handle("print-settings:save",(_e,p={})=>{
  const entries=Object.entries(p);db.run("BEGIN IMMEDIATE");try{const st=db.prepare("INSERT INTO print_settings(setting_key,setting_value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=CURRENT_TIMESTAMP");try{entries.forEach(([k,v])=>st.run([k,String(v)]));}finally{st.free();}audit("SAVE_PRINT_SETTINGS","PRINT","", "Pengaturan cetak diperbarui.");db.run("COMMIT");}catch(e){db.run("ROLLBACK");throw e;}saveDb();return {ok:true};
 });
 ipcMain.handle("archive:create",(_e,p={})=>{
- const from=String(p.date_from||""),to=String(p.date_to||"");if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal arsip tidak valid.");
+ const from=String(p.date_from||""),to=String(p.date_to||"");if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal arsip tidak valid.");
  const data={version:1,createdAt:new Date().toISOString(),dateFrom:from,dateTo:to,accounts:rows("SELECT * FROM accounts"),journals:rows("SELECT * FROM journal_headers WHERE journal_date BETWEEN ? AND ?",[from,to]).map(h=>({...h,lines:rows("SELECT * FROM journal_lines WHERE journal_id=?",[h.id])})),openingBalances:rows("SELECT * FROM opening_balances WHERE period_key BETWEEN ? AND ?",[from.slice(0,7),to.slice(0,7)]),budgets:rows("SELECT * FROM annual_budgets WHERE fiscal_year BETWEEN ? AND ?",[Number(from.slice(0,4)),Number(to.slice(0,4))]),debitNotes:rows("SELECT * FROM debit_notes WHERE note_date BETWEEN ? AND ?",[from,to]),nptrans:rows("SELECT * FROM nptrans_rows WHERE (transaction_date BETWEEN ? AND ?) OR transaction_date IS NULL",[from,to]),audit:rows("SELECT * FROM audit_logs WHERE substr(occurred_at,1,10) BETWEEN ? AND ?",[from,to])};
  const choice=dialog.showSaveDialogSync({title:"Simpan Arsip SBP Accounting",defaultPath:"SBP-Archive-"+from+"-"+to+".json",filters:[{name:"SBP Archive",extensions:["json"]}]});if(!choice)return {canceled:true};
  const archiveText=JSON.stringify(data,null,2);fs.writeFileSync(choice,archiveText,"utf8");const checksum=crypto.createHash("sha256").update(archiveText,"utf8").digest("hex");const count=data.journals.length;
