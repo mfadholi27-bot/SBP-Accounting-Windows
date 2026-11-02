@@ -364,6 +364,101 @@ ipcMain.handle("budgets:delete", (_event, payload = {}) => {
   return {ok:true};
 });
 
+
+ipcMain.handle("imports:accounts", (_event, payload = {}) => {
+  const items=Array.isArray(payload.items)?payload.items:[];
+  if(!items.length) throw new Error("Tidak ada akun valid untuk diimpor.");
+  let inserted=0,updated=0,skipped=0;
+  db.run("BEGIN IMMEDIATE");
+  try {
+    for(const item of items){
+      const sandi=String(item.sandi||"").trim(),name=String(item.account_name||"").trim();
+      if(!sandi||!name){skipped++;continue;}
+      const old=rows("SELECT id FROM accounts WHERE sandi=?",[sandi]);
+      if(old.length){
+        db.run("UPDATE accounts SET account_name=?,updated_at=CURRENT_TIMESTAMP WHERE sandi=?",[name,sandi]);updated++;
+      }else{
+        db.run("INSERT INTO accounts(sandi,account_name,account_type,normal_balance,is_active,created_at) VALUES(?,?,?,'DEBIT',1,CURRENT_TIMESTAMP)",
+          [sandi,name,String(item.account_type||"")]);inserted++;
+      }
+    }
+    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('IMPORT_ACCOUNTS','IMPORT',?)",
+      ["Import Master Akun: "+inserted+" baru, "+updated+" diperbarui, "+skipped+" dilewati"]);
+    db.run("COMMIT");
+  }catch(error){db.run("ROLLBACK");throw error;}
+  saveDb();return {ok:true,inserted,updated,skipped};
+});
+
+ipcMain.handle("nptrans:list", (_event, filters = {}) => {
+  const q=String(filters.keyword||"").trim().toLowerCase();
+  return rows(
+    `SELECT id,sandi,transaction_date,voucher_number,row_number,description,amount,raw_json
+     FROM nptrans_rows
+     WHERE lower(COALESCE(sandi,'')) LIKE ? OR lower(COALESCE(voucher_number,'')) LIKE ?
+       OR lower(COALESCE(description,'')) LIKE ?
+     ORDER BY transaction_date DESC,id DESC LIMIT 1000`,
+    ["%"+q+"%","%"+q+"%","%"+q+"%"]
+  ).map(x=>({...x,raw:JSON.parse(x.raw_json||"{}")}));
+});
+
+ipcMain.handle("nptrans:import", (_event, payload = {}) => {
+  const items=Array.isArray(payload.items)?payload.items:[];
+  const mode=String(payload.mode||"merge");
+  if(!items.length)throw new Error("Tidak ada baris NPTRANS yang valid.");
+  if(!["merge","append","replace"].includes(mode))throw new Error("Mode import tidak dikenal.");
+  const importName=String(payload.file_name||"NPTRANS import");
+  const hash=String(payload.source_hash||"");
+  let inserted=0,skipped=0;
+  db.run("BEGIN IMMEDIATE");
+  try{
+    if(mode==="replace") db.run("DELETE FROM nptrans_rows");
+    db.run("INSERT INTO nptrans_imports(file_name,file_type,source_hash,source_record_count,active_record_count,deleted_record_count,status,summary_json) VALUES(?,?,?,?,?,?,?,?)",
+      [importName,String(payload.file_type||"UNKNOWN"),hash,Number(payload.total_read||items.length),items.length,Number(payload.deleted_count||0),"IMPORTED",JSON.stringify({mode})]);
+    const importId=db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+    const existing=new Set(rows("SELECT sandi,transaction_date,voucher_number,row_number,description,amount FROM nptrans_rows").map(x=>
+      [x.sandi,x.transaction_date,x.voucher_number,x.row_number,x.description,Number(x.amount||0).toFixed(2)].join("|").toUpperCase()
+    ));
+    const stmt=db.prepare("INSERT INTO nptrans_rows(import_id,source_row_no,sandi,transaction_date,voucher_number,row_number,description,amount,raw_json) VALUES(?,?,?,?,?,?,?,?,?)");
+    try{
+      items.forEach((x,index)=>{
+        const key=[x.sandi,x.transaction_date,x.voucher_number,x.row_number,x.description,Number(x.amount||0).toFixed(2)].join("|").toUpperCase();
+        if(mode==="merge"&&existing.has(key)){skipped++;return;}
+        stmt.run([importId,Number(x.source_row_no||index+1),String(x.sandi||""),String(x.transaction_date||""),String(x.voucher_number||""),String(x.row_number||""),String(x.description||""),Number(x.amount||0),JSON.stringify(x.raw||x)]);
+        existing.add(key);inserted++;
+      });
+    }finally{stmt.free();}
+    db.run("UPDATE nptrans_imports SET active_record_count=? WHERE id=?",[inserted,importId]);
+    db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary) VALUES('IMPORT_NPTRANS','NPTRANS_IMPORT',?,?)",
+      [String(importId),"Import "+importName+": "+inserted+" baris baru, "+skipped+" duplikat dilewati"]);
+    db.run("COMMIT");
+  }catch(error){db.run("ROLLBACK");throw error;}
+  saveDb();return {ok:true,inserted,skipped,total:items.length};
+});
+
+ipcMain.handle("imports:opening-balances", (_event, payload = {}) => {
+  const items=Array.isArray(payload.items)?payload.items:[];
+  if(!items.length)throw new Error("Tidak ada saldo awal valid untuk diimpor.");
+  let inserted=0,skipped=0;
+  db.run("BEGIN IMMEDIATE");
+  try{
+    const stmt=db.prepare("INSERT OR IGNORE INTO opening_balances(period_key,account_id,sandi,program_code,debit,credit,source_type,source_reference) VALUES(?,?,?,? ,?,?,?,?)");
+    try{
+      for(const x of items){
+        const period=String(x.period_key||""),sandi=String(x.sandi||"").trim();
+        if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)||!sandi) {skipped++;continue;}
+        const acc=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi]);
+        if(!acc.length)throw new Error("SANDI "+sandi+" tidak ditemukan atau tidak aktif.");
+        stmt.run([period,acc[0].id,sandi,String(x.program_code||""),Number(x.debit||0),Number(x.credit||0),"IMPORT",String(payload.file_name||"")]);
+        if(db.getRowsModified())inserted++;else skipped++;
+      }
+    }finally{stmt.free();}
+    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('IMPORT_OPENING_BALANCES','OPENING_BALANCE',?)",
+      ["Import saldo awal: "+inserted+" baru, "+skipped+" dilewati"]);
+    db.run("COMMIT");
+  }catch(error){db.run("ROLLBACK");throw error;}
+  saveDb();return {ok:true,inserted,skipped};
+});
+
 ipcMain.handle("db:backup", async () => {
   const choice = await dialog.showSaveDialog({
     title: "Simpan Backup SBP Accounting",
