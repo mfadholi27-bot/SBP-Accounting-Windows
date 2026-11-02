@@ -11,15 +11,24 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, ia32]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 16
       - run: npm install
-      - run: npm run dist:all
+      - name: Build Windows x64
+        if: matrix.arch == 'x64'
+        run: npx electron-builder --win nsis --x64 --publish never --config.directories.output=release/x64
+      - name: Build Windows x86
+        if: matrix.arch == 'ia32'
+        run: npx electron-builder --win nsis --ia32 --publish never --config.directories.output=release/ia32
       - uses: actions/upload-artifact@v4
         with:
-          name: SBP-Accounting-V19-Windows-Installers
-          path: release/*.exe
+          name: SBP-Accounting-V19-Windows-${{ matrix.arch }}
+          path: release/${{ matrix.arch }}/*.exe
           if-no-files-found: error

@@ -1,10 +1,20 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { pathToFileURL } = require("url");
+protocol.registerSchemesAsPrivileged([{scheme:"sbp",privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 let mainWindow;
 let quitting = false;
 app.setName("SBP Accounting V19");
 function backupName(){return "SBP-V19-Windows-Backup-"+new Date().toISOString().replace(/[:.]/g,"-")+".json";}
+function appFilePath(urlPath){
+  const root=path.resolve(app.getAppPath(),"src","v19");
+  const decoded=decodeURIComponent(urlPath||"/");
+  const relative=decoded==="/"?"index.html":decoded.replace(/^\/+/, "");
+  const target=path.resolve(root,relative);
+  if(target!==root&&!target.startsWith(root+path.sep))throw new Error("Invalid app path");
+  return target;
+}
 async function readState(){
   if(!mainWindow) throw new Error("Jendela aplikasi belum siap");
   return mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const r=indexedDB.open("sbp-accounting-v19",1);r.onerror=()=>reject(r.error);r.onsuccess=()=>{const db=r.result;if(!db.objectStoreNames.contains("app")){resolve(null);return;}const q=db.transaction("app","readonly").objectStore("app").get("main");q.onsuccess=()=>resolve(q.result||null);q.onerror=()=>reject(q.error);};})`,true);
@@ -40,16 +50,16 @@ ipcMain.handle("sbp:restore",async()=>{
   return {ok:true};
 });
 async function automaticBackup(){
-  try{const state=await readState();if(!state)return;const dir=path.join(app.getPath("userData"),"Backups");fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,backupName());fs.writeFileSync(file,JSON.stringify(makePayload(state,"automatic-on-exit"),null,2),"utf8");const files=fs.readdirSync(dir).filter(n=>n.endsWith(".json")).map(n=>({n,p:path.join(dir,n),t:fs.statSync(path.join(dir,n)).mtimeMs})).sort((a,b)=>b.t-a.t);for(const old of files.slice(30))fs.unlinkSync(old.p);}catch(e){console.error("Automatic backup failed:",e);}
+  try{const state=await readState();if(!state)return;const dir=path.join(app.getPath("userData"),"Backups");fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,backupName());fs.writeFileSync(file,JSON.stringify(makePayload(state,"automatic-on-exit"),null,2),"utf8");const files=fs.readdirSync(dir).filter(n=>n.endsWith(".json")).map(n=>({p:path.join(dir,n),t:fs.statSync(path.join(dir,n)).mtimeMs})).sort((a,b)=>b.t-a.t);for(const old of files.slice(30))fs.unlinkSync(old.p);}catch(e){console.error("Automatic backup failed:",e);}
 }
 function createWindow(){
   mainWindow=new BrowserWindow({width:1500,height:950,minWidth:1100,minHeight:700,show:false,backgroundColor:"#f8faf9",webPreferences:{preload:path.join(__dirname,"preload.js"),contextIsolation:true,nodeIntegration:false,sandbox:true}});
-  mainWindow.loadFile(path.join(__dirname,"../src/v19/index.html"));
+  mainWindow.loadURL("sbp://app/index.html");
   mainWindow.once("ready-to-show",()=>mainWindow.show());
   mainWindow.on("close",event=>{if(!quitting){event.preventDefault();quitting=true;automaticBackup().finally(()=>{if(mainWindow)mainWindow.destroy();});}});
   mainWindow.on("closed",()=>{mainWindow=null;});
 }
 const template=[{label:"File",submenu:[{label:"Backup Data Windows...",click:()=>mainWindow?.webContents.send("sbp:menu-backup")},{label:"Restore Backup...",click:()=>mainWindow?.webContents.send("sbp:menu-restore")},{type:"separator"},{role:"quit"}]},{label:"View",submenu:[{role:"reload"},{role:"toggleDevTools"},{type:"separator"},{role:"resetZoom"},{role:"zoomIn"},{role:"zoomOut"},{type:"separator"},{role:"togglefullscreen"}]}];
-app.whenReady().then(()=>{Menu.setApplicationMenu(Menu.buildFromTemplate(template));createWindow();app.on("activate",()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
+app.whenReady().then(()=>{protocol.handle("sbp",request=>{try{return net.fetch(pathToFileURL(appFilePath(new URL(request.url).pathname)).toString());}catch(e){return new Response("Not found",{status:404});}});Menu.setApplicationMenu(Menu.buildFromTemplate(template));createWindow();app.on("activate",()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
 app.on("before-quit",event=>{if(quitting)return;event.preventDefault();quitting=true;automaticBackup().finally(()=>{if(mainWindow)mainWindow.destroy();else app.quit();});});
 app.on("window-all-closed",()=>{if(process.platform!=="darwin"&&!quitting)app.quit();});
