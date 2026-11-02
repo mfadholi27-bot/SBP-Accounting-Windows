@@ -10,17 +10,29 @@
 <body>
 <aside class="sidebar">
   <div class="brand"><div class="mark">SBP</div><div><b>SBP Accounting</b><small>WINDOWS V20</small></div></div>
-  <p class="nav-caption">MENU UTAMA</p>
-  <button class="nav active" data-view="dashboard">▦ <span>Dashboard</span></button>
-  <button class="nav" data-view="accounts">▤ <span>Master Akun</span></button>
-  <button class="nav" data-view="journals">⇄ <span>Jurnal Maintenance</span></button>
-  <button class="nav" data-view="opening">▣ <span>Saldo Awal ACC & Program</span></button>
-  <button class="nav" data-view="budget">◷ <span>Anggaran per Akun</span></button>
+  <p class="nav-caption">RINGKASAN</p>
+  <button class="nav active" data-view="dashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
+  <p class="nav-caption">TRANSAKSI & DATA</p>
+  <button class="nav" data-view="journal"><span class="nav-icon">⇄</span><span>Jurnal Maintenance</span></button>
+  <button class="nav" data-view="journal-list"><span class="nav-icon">☷</span><span>Daftar Jurnal</span></button>
+  <button class="nav" data-view="debit-notes"><span class="nav-icon">▤</span><span>Nota Debet</span></button>
+  <button class="nav" data-view="accounts"><span class="nav-icon">▥</span><span>Sandi Perkiraan / Master Akun</span></button>
+  <button class="nav" data-view="opening-balances"><span class="nav-icon">▣</span><span>Saldo Awal ACC & Program</span></button>
+  <button class="nav" data-view="annual-budget"><span class="nav-icon">◷</span><span>Anggaran Tahunan</span></button>
+  <button class="nav" data-view="periods"><span class="nav-icon">▦</span><span>Periode Akuntansi</span></button>
   <p class="nav-caption">LAPORAN</p>
-  <button class="nav" data-view="ledger">▥ <span>Buku Besar</span></button>
-  <button class="nav" data-view="trial">▧ <span>Neraca Percobaan</span></button>
-  <button class="nav" data-view="reports">▤ <span>Laporan Keuangan</span></button>
-  <div class="side-foot">DATABASE LOKAL <i></i></div>
+  <button class="nav" data-view="ledger"><span class="nav-icon">▥</span><span>Buku Besar</span></button>
+  <button class="nav" data-view="reports"><span class="nav-icon">▧</span><span>Laporan Keuangan</span></button>
+  <p class="nav-caption">DATA & PENGENDALIAN</p>
+  <button class="nav" data-view="import-center"><span class="nav-icon">⇧</span><span>Import Center / NPTRANS</span></button>
+  <button class="nav" data-view="validation"><span class="nav-icon">✓</span><span>Validasi Data</span></button>
+  <button class="nav" data-view="journal-admin"><span class="nav-icon">⚙</span><span>Journal Admin</span></button>
+  <button class="nav" data-view="print-settings"><span class="nav-icon">▤</span><span>Pengaturan Cetak</span></button>
+  <button class="nav" data-view="audit"><span class="nav-icon">◉</span><span>Audit Log</span></button>
+  <button class="nav" data-view="archive"><span class="nav-icon">▣</span><span>Arsip Tahunan</span></button>
+  <button class="nav" data-view="archive-reader"><span class="nav-icon">⌕</span><span>Pembaca Arsip</span></button>
+  <button class="nav" data-view="backup"><span class="nav-icon">⤓</span><span>Backup & Restore</span></button>
+  <div class="side-foot">DATABASE LOKAL <i></i><small>V20 · OFFLINE DESKTOP</small></div>
 </aside>
 <main class="main">
   <header class="top"><div><small>SISTEM PEMBUKUAN</small><h1 id="page-title">Dashboard</h1></div><div class="top-right"><span class="offline"><i></i> Offline</span><button id="backup">Buat Backup</button></div></header>
@@ -48,13 +60,22 @@
     <p class="hint">Akun yang sudah digunakan dalam jurnal tidak dapat dihapus. Akun tersebut dapat dinonaktifkan agar riwayat transaksi tetap aman.</p>
   </section>
 
-  <section class="view" id="view-journals"><div class="placeholder panel"><span>⇄</span><h2>Jurnal Maintenance</h2><p>Modul jurnal akan dibuat setelah Master Akun selesai diuji.</p></div></section>
-  <section class="view" id="view-opening"><div class="placeholder panel"><span>▣</span><h2>Saldo Awal ACC & Program</h2><p>Modul saldo awal sedang dalam antrean pengembangan.</p></div></section>
-  <section class="view" id="view-budget"><div class="placeholder panel"><span>◷</span><h2>Anggaran per Akun</h2><p>Modul anggaran sedang dalam antrean pengembangan.</p></div></section>
-  <section class="view" id="view-ledger"><div class="placeholder panel"><span>▥</span><h2>Buku Besar</h2><p>Laporan akan terhubung dengan jurnal berstatus POSTED.</p></div></section>
-  <section class="view" id="view-trial"><div class="placeholder panel"><span>▧</span><h2>Neraca Percobaan</h2><p>Laporan akan menggunakan saldo awal dan mutasi jurnal POSTED.</p></div></section>
-  <section class="view" id="view-reports"><div class="placeholder panel"><span>▤</span><h2>Laporan Keuangan</h2><p>Laporan keuangan akan dikembangkan setelah struktur jurnal selesai.</p></div></section>
-
+  <section class="view" id="view-journal"><div class="placeholder panel"><span>⇄</span><h2>Jurnal Maintenance</h2><p>Ruang kerja input jurnal, validasi debit-kredit, penyimpanan draft, dan posting akan dibangun pada tahap modul jurnal.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-journal-list"><div class="placeholder panel"><span>☷</span><h2>Daftar Jurnal</h2><p>Daftar transaksi, filter periode, status draft/posted, dan tindakan koreksi terkontrol.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-debit-notes"><div class="placeholder panel"><span>▤</span><h2>Nota Debet</h2><p>Pengelolaan nota debet dan keterkaitannya dengan jurnal.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-opening-balances"><div class="placeholder panel"><span>▣</span><h2>Saldo Awal ACC & Program</h2><p>Saldo awal per SANDI akun, termasuk pratinjau impor dan pemeriksaan keseimbangan.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-annual-budget"><div class="placeholder panel"><span>◷</span><h2>Anggaran Tahunan</h2><p>Anggaran per akun dan bulan, realisasi, serta sisa anggaran.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-periods"><div class="placeholder panel"><span>▦</span><h2>Periode Akuntansi</h2><p>Pengaturan periode, pembukaan dan penutupan periode, serta penguncian transaksi.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-ledger"><div class="placeholder panel"><span>▥</span><h2>Buku Besar</h2><p>Laporan mutasi per akun yang mengambil transaksi berstatus POSTED.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-reports"><div class="placeholder panel"><span>▧</span><h2>Laporan Keuangan</h2><p>Pusat laporan akuntansi dan rekapitulasi periode.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-import-center"><div class="placeholder panel"><span>⇧</span><h2>Import Center / NPTRANS</h2><p>Impor CSV, Excel, DBF, NPSALDO, serta pengelolaan template sumber.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-validation"><div class="placeholder panel"><span>✓</span><h2>Validasi Data</h2><p>Pemeriksaan konsistensi akun, jurnal, saldo, dan keseimbangan pembukuan.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-journal-admin"><div class="placeholder panel"><span>⚙</span><h2>Journal Admin</h2><p>Pengelolaan administratif jurnal dengan jejak audit dan prosedur pengamanan.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-print-settings"><div class="placeholder panel"><span>▤</span><h2>Pengaturan Cetak</h2><p>Pengaturan kertas, orientasi, kop, tanda tangan, ringkasan, dan nomor halaman.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-audit"><div class="placeholder panel"><span>◉</span><h2>Audit Log</h2><p>Riwayat perubahan dan aktivitas penting pada aplikasi.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-archive"><div class="placeholder panel"><span>▣</span><h2>Arsip Tahunan</h2><p>Pengelolaan arsip pembukuan tahunan secara terpisah dan terverifikasi.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-archive-reader"><div class="placeholder panel"><span>⌕</span><h2>Pembaca Arsip</h2><p>Membuka dan meninjau data arsip tanpa mengubah arsip sumber.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-backup"><div class="placeholder panel"><span>⤓</span><h2>Backup & Restore</h2><p>Pencadangan dan pemulihan database lokal dengan pemeriksaan sebelum pemulihan.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
   <footer>SBP Accounting Windows V20 · Proyek mandiri · Tidak terhubung ke V19</footer>
 </main>
 
