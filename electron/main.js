@@ -5,6 +5,7 @@ const initSqlJs = require("sql.js");
 
 let db;
 let dbPath;
+let SQL;
 
 function wasmPath() {
   return app.isPackaged
@@ -14,7 +15,14 @@ function wasmPath() {
 
 function saveDb() {
   if (!db || !dbPath) return;
-  fs.writeFileSync(dbPath, Buffer.from(db.export()));
+  const tempPath = dbPath + ".tmp";
+  fs.writeFileSync(tempPath, Buffer.from(db.export()));
+  try {
+    fs.renameSync(tempPath, dbPath);
+  } catch (error) {
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    fs.renameSync(tempPath, dbPath);
+  }
 }
 
 function rows(sql, params = []) {
@@ -29,8 +37,42 @@ function rows(sql, params = []) {
   }
 }
 
+function ensureColumn(table, column, declaration) {
+  const columns = rows("PRAGMA table_info(" + table + ")");
+  if (!columns.some(item => item.name === column)) {
+    db.run("ALTER TABLE " + table + " ADD COLUMN " + column + " " + declaration);
+  }
+}
+
+function applySchemaMigrations() {
+  const schemaPath = path.join(__dirname, "schema.sql");
+  const schema = fs.readFileSync(schemaPath, "utf8");
+  db.run(schema);
+
+  // Additive-only migration: existing V20 data is preserved.
+  ensureColumn("accounts", "parent_sandi", "TEXT");
+  ensureColumn("accounts", "account_group", "TEXT");
+  ensureColumn("accounts", "created_at", "TEXT");
+  ensureColumn("accounts", "updated_at", "TEXT");
+  ensureColumn("journal_headers", "source_type", "TEXT");
+  ensureColumn("journal_headers", "source_id", "TEXT");
+  ensureColumn("journal_headers", "source_voucher", "TEXT");
+  ensureColumn("journal_headers", "split_from_id", "INTEGER");
+  ensureColumn("journal_headers", "updated_at", "TEXT");
+  ensureColumn("journal_headers", "posted_at", "TEXT");
+  ensureColumn("journal_headers", "cancelled_at", "TEXT");
+  ensureColumn("journal_headers", "cancel_reason", "TEXT");
+  ensureColumn("journal_lines", "line_no", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("journal_lines", "account_id", "INTEGER");
+
+  db.run("INSERT OR IGNORE INTO schema_migrations(version,description) VALUES (1,'Initial V20 desktop schema')");
+  db.run("INSERT OR IGNORE INTO schema_migrations(version,description) VALUES (2,'V19 successor domain schema')");
+  db.run("INSERT OR REPLACE INTO app_meta(key,value) VALUES ('schema_version','2')");
+  db.run("INSERT OR IGNORE INTO app_meta(key,value) VALUES ('application_version','20.0.0')");
+}
+
 async function initDatabase() {
-  const SQL = await initSqlJs({ locateFile: () => wasmPath() });
+  SQL = await initSqlJs({ locateFile: () => wasmPath() });
   const dataDir = path.join(app.getPath("userData"), "data");
   fs.mkdirSync(dataDir, { recursive: true });
   dbPath = path.join(dataDir, "sbp-accounting.db");
@@ -39,39 +81,8 @@ async function initDatabase() {
     ? new SQL.Database(fs.readFileSync(dbPath))
     : new SQL.Database();
 
-  db.run(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS app_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS accounts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sandi TEXT NOT NULL UNIQUE,
-      account_name TEXT NOT NULL,
-      account_type TEXT,
-      normal_balance TEXT,
-      is_active INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE TABLE IF NOT EXISTS journal_headers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      journal_date TEXT NOT NULL,
-      voucher_number TEXT,
-      description TEXT,
-      status TEXT NOT NULL DEFAULT 'DRAFT',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS journal_lines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      journal_id INTEGER NOT NULL,
-      sandi TEXT NOT NULL,
-      description TEXT,
-      debit REAL NOT NULL DEFAULT 0,
-      credit REAL NOT NULL DEFAULT 0,
-      FOREIGN KEY(journal_id) REFERENCES journal_headers(id)
-    );
-    INSERT OR IGNORE INTO app_meta(key,value) VALUES ('schema_version','1');
-  `);
+  db.run("PRAGMA foreign_keys = ON");
+  applySchemaMigrations();
   saveDb();
 }
 
@@ -106,24 +117,27 @@ ipcMain.handle("accounts:save", (_event, account) => {
   const accountType = String(account && account.account_type || "").trim();
   const normalBalance = String(account && account.normal_balance || "DEBIT").trim().toUpperCase();
   const id = Number(account && account.id || 0);
-
   if (!sandi || !accountName) throw new Error("SANDI dan Nama Akun wajib diisi.");
   if (!/^[A-Za-z0-9._/-]{1,30}$/.test(sandi)) throw new Error("Format SANDI tidak valid (maksimal 30 karakter).");
   if (!["DEBIT", "KREDIT"].includes(normalBalance)) throw new Error("Saldo normal harus Debit atau Kredit.");
-
   const duplicate = rows("SELECT id FROM accounts WHERE sandi=? AND id<>?", [sandi, id]);
   if (duplicate.length) throw new Error("SANDI akun sudah digunakan.");
 
-  if (id) {
-    const exists = rows("SELECT id FROM accounts WHERE id=?", [id]);
-    if (!exists.length) throw new Error("Akun yang akan diubah tidak ditemukan.");
-    const stmt = db.prepare("UPDATE accounts SET sandi=?, account_name=?, account_type=?, normal_balance=? WHERE id=?");
-    stmt.run([sandi, accountName, accountType, normalBalance, id]);
-    stmt.free();
-  } else {
-    const stmt = db.prepare("INSERT INTO accounts(sandi, account_name, account_type, normal_balance, is_active) VALUES(?,?,?,?,1)");
-    stmt.run([sandi, accountName, accountType, normalBalance]);
-    stmt.free();
+  db.run("BEGIN IMMEDIATE");
+  try {
+    if (id) {
+      const exists = rows("SELECT id FROM accounts WHERE id=?", [id]);
+      if (!exists.length) throw new Error("Akun yang akan diubah tidak ditemukan.");
+      const stmt = db.prepare("UPDATE accounts SET sandi=?, account_name=?, account_type=?, normal_balance=?, updated_at=CURRENT_TIMESTAMP WHERE id=?");
+      try { stmt.run([sandi, accountName, accountType, normalBalance, id]); } finally { stmt.free(); }
+    } else {
+      const stmt = db.prepare("INSERT INTO accounts(sandi, account_name, account_type, normal_balance, is_active, created_at) VALUES(?,?,?,?,1,CURRENT_TIMESTAMP)");
+      try { stmt.run([sandi, accountName, accountType, normalBalance]); } finally { stmt.free(); }
+    }
+    db.run("COMMIT");
+  } catch (error) {
+    db.run("ROLLBACK");
+    throw error;
   }
   saveDb();
   return { ok: true };
@@ -133,9 +147,8 @@ ipcMain.handle("accounts:set-active", (_event, payload) => {
   const id = Number(payload && payload.id);
   const active = payload && payload.active ? 1 : 0;
   if (!id) throw new Error("ID akun tidak valid.");
-  const stmt = db.prepare("UPDATE accounts SET is_active=? WHERE id=?");
-  stmt.run([active, id]);
-  stmt.free();
+  const stmt = db.prepare("UPDATE accounts SET is_active=?, updated_at=CURRENT_TIMESTAMP WHERE id=?");
+  try { stmt.run([active, id]); } finally { stmt.free(); }
   saveDb();
   return { ok: true };
 });
@@ -144,11 +157,14 @@ ipcMain.handle("accounts:delete", (_event, idValue) => {
   const id = Number(idValue);
   const account = rows("SELECT sandi FROM accounts WHERE id=?", [id]);
   if (!account.length) throw new Error("Akun tidak ditemukan.");
-  const used = rows("SELECT COUNT(*) AS total FROM journal_lines WHERE sandi=?", [account[0].sandi]);
-  if (Number(used[0].total) > 0) throw new Error("Akun sudah digunakan dalam jurnal. Nonaktifkan akun, jangan hapus.");
+  const usedJournals = rows("SELECT COUNT(*) AS total FROM journal_lines WHERE sandi=?", [account[0].sandi]);
+  const usedOpening = rows("SELECT COUNT(*) AS total FROM opening_balances WHERE sandi=?", [account[0].sandi]);
+  const usedBudget = rows("SELECT COUNT(*) AS total FROM annual_budgets WHERE sandi=?", [account[0].sandi]);
+  if (Number(usedJournals[0].total) + Number(usedOpening[0].total) + Number(usedBudget[0].total) > 0) {
+    throw new Error("Akun sudah dipakai dalam transaksi, saldo awal, atau anggaran. Nonaktifkan akun agar riwayat tetap aman.");
+  }
   const stmt = db.prepare("DELETE FROM accounts WHERE id=?");
-  stmt.run([id]);
-  stmt.free();
+  try { stmt.run([id]); } finally { stmt.free(); }
   saveDb();
   return { ok: true };
 });
@@ -183,8 +199,15 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  await initDatabase();
-  await createWindow();
+  try {
+    await initDatabase();
+    await createWindow();
+  } catch (error) {
+    console.error("SBP database initialization failed:", error);
+    dialog.showErrorBox("SBP Accounting - Database", "Database gagal dibuka atau dimigrasikan. Data lama tidak dihapus.\n\n" + error.message);
+    app.quit();
+    return;
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
