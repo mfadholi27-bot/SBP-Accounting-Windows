@@ -169,6 +169,127 @@ ipcMain.handle("accounts:delete", (_event, idValue) => {
   return { ok: true };
 });
 
+
+function journalLinesFor(id) {
+  return rows(
+    `SELECT jl.id, jl.line_no, jl.sandi, a.account_name, jl.description, jl.debit, jl.credit
+     FROM journal_lines jl LEFT JOIN accounts a ON a.sandi=jl.sandi
+     WHERE jl.journal_id=? ORDER BY jl.line_no, jl.id`,
+    [id]
+  );
+}
+
+ipcMain.handle("journals:list", (_event, filters = {}) => {
+  const keyword = String(filters.keyword || "").trim().toLowerCase();
+  const status = String(filters.status || "ALL").toUpperCase();
+  const dateFrom = String(filters.dateFrom || "");
+  const dateTo = String(filters.dateTo || "");
+  const clauses = ["(lower(j.voucher_number) LIKE ? OR lower(j.description) LIKE ?)"];
+  const params = ["%" + keyword + "%", "%" + keyword + "%"];
+  if (status !== "ALL") { clauses.push("j.status=?"); params.push(status); }
+  if (dateFrom) { clauses.push("j.journal_date>=?"); params.push(dateFrom); }
+  if (dateTo) { clauses.push("j.journal_date<=?"); params.push(dateTo); }
+  const headers = rows(
+    "SELECT j.id,j.journal_date,j.voucher_number,j.description,j.status,j.created_at,j.posted_at," +
+    "(SELECT COALESCE(SUM(debit),0) FROM journal_lines WHERE journal_id=j.id) AS total_debit," +
+    "(SELECT COALESCE(SUM(credit),0) FROM journal_lines WHERE journal_id=j.id) AS total_credit " +
+    "FROM journal_headers j WHERE " + clauses.join(" AND ") +
+    " ORDER BY j.journal_date DESC,j.id DESC LIMIT 500",
+    params
+  );
+  return headers.map(item => ({ ...item, lines: journalLinesFor(item.id) }));
+});
+
+ipcMain.handle("journals:save", (_event, payload = {}) => {
+  const id = Number(payload.id || 0);
+  const date = String(payload.journal_date || "").trim();
+  const voucher = String(payload.voucher_number || "").trim();
+  const description = String(payload.description || "").trim();
+  const status = String(payload.status || "DRAFT").toUpperCase();
+  const linesInput = Array.isArray(payload.lines) ? payload.lines : [];
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) throw new Error("Tanggal jurnal tidak valid.");
+  if (!voucher || voucher.length > 60) throw new Error("Nomor bukti wajib diisi (maksimal 60 karakter).");
+  if (!description) throw new Error("Keterangan jurnal wajib diisi.");
+  if (!["DRAFT", "POSTED"].includes(status)) throw new Error("Status jurnal tidak valid.");
+  if (linesInput.length < 2) throw new Error("Jurnal minimal memiliki dua baris.");
+  if (id) {
+    const old = rows("SELECT id,status,journal_date FROM journal_headers WHERE id=?", [id]);
+    if (!old.length) throw new Error("Jurnal tidak ditemukan.");
+    if (old[0].status !== "DRAFT") throw new Error("Jurnal POSTED tidak dapat diedit. Gunakan jurnal koreksi atau pembalik.");
+  }
+  if (rows("SELECT id FROM journal_headers WHERE voucher_number=? AND id<>?", [voucher, id]).length) {
+    throw new Error("Nomor bukti sudah digunakan.");
+  }
+  let debit = 0, credit = 0;
+  const cleanLines = linesInput.map((line, index) => {
+    const sandi = String(line.sandi || "").trim();
+    const note = String(line.description || "").trim();
+    const d = Number(line.debit || 0), c = Number(line.credit || 0);
+    if (!sandi || !Number.isFinite(d) || !Number.isFinite(c) || d < 0 || c < 0 || (d > 0 && c > 0)) {
+      throw new Error("Baris " + (index + 1) + ": pilih akun dan isi nilai debit/kredit yang valid.");
+    }
+    const account = rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1", [sandi]);
+    if (!account.length) throw new Error("SANDI " + sandi + " tidak ditemukan atau tidak aktif.");
+    debit += d; credit += c;
+    return { line_no: index + 1, account_id: account[0].id, sandi, description: note, debit: d, credit: c };
+  });
+  if (status === "POSTED") {
+    if (cleanLines.some(line => line.debit + line.credit <= 0)) throw new Error("Setiap baris POSTED harus memiliki nilai debit atau kredit.");
+    if (Math.abs(debit - credit) > 0.005) throw new Error("Jurnal belum seimbang. Debit: " + debit + " | Kredit: " + credit);
+  }
+  const period = date.slice(0, 7);
+  const periodRows = rows("SELECT status FROM accounting_periods WHERE period_key=?", [period]);
+  if (periodRows.length && periodRows[0].status === "CLOSED") throw new Error("Periode " + period + " sudah ditutup.");
+  db.run("BEGIN IMMEDIATE");
+  try {
+    let journalId = id;
+    if (id) {
+      db.run("UPDATE journal_headers SET journal_date=?,voucher_number=?,description=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        [date, voucher, description, id]);
+      db.run("DELETE FROM journal_lines WHERE journal_id=?", [id]);
+    } else {
+      db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,created_at) VALUES(?,?,?,'DRAFT',CURRENT_TIMESTAMP)",
+        [date, voucher, description]);
+      journalId = db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+    }
+    const stmt = db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+    try { cleanLines.forEach(line => stmt.run([journalId,line.line_no,line.account_id,line.sandi,line.description,line.debit,line.credit])); }
+    finally { stmt.free(); }
+    if (status === "POSTED") {
+      db.run("UPDATE journal_headers SET status='POSTED',posted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?", [journalId]);
+    } else {
+      db.run("UPDATE journal_headers SET status='DRAFT',updated_at=CURRENT_TIMESTAMP WHERE id=?", [journalId]);
+    }
+    db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary) VALUES(?,?,?,?)",
+      [id ? "UPDATE_JOURNAL_DRAFT" : (status === "POSTED" ? "CREATE_POSTED_JOURNAL" : "CREATE_JOURNAL_DRAFT"),"JOURNAL",String(journalId),"Nomor bukti " + voucher + " · " + status]);
+    db.run("COMMIT");
+    saveDb();
+    return { ok: true, id: journalId, status, totalDebit: debit, totalCredit: credit };
+  } catch (error) {
+    db.run("ROLLBACK");
+    throw error;
+  }
+});
+
+ipcMain.handle("journals:delete-draft", (_event, idValue) => {
+  const id = Number(idValue);
+  const item = rows("SELECT id,voucher_number,status,journal_date FROM journal_headers WHERE id=?", [id]);
+  if (!item.length) throw new Error("Jurnal tidak ditemukan.");
+  if (item[0].status !== "DRAFT") throw new Error("Hanya jurnal DRAFT yang dapat dihapus.");
+  const period = String(item[0].journal_date).slice(0,7);
+  const closed = rows("SELECT status FROM accounting_periods WHERE period_key=?", [period]);
+  if (closed.length && closed[0].status === "CLOSED") throw new Error("Periode sudah ditutup.");
+  db.run("BEGIN IMMEDIATE");
+  try {
+    db.run("DELETE FROM journal_headers WHERE id=?", [id]);
+    db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary) VALUES('DELETE_JOURNAL_DRAFT','JOURNAL',?,?)",
+      [String(id),"Hapus draft " + item[0].voucher_number]);
+    db.run("COMMIT");
+  } catch (error) { db.run("ROLLBACK"); throw error; }
+  saveDb();
+  return { ok: true };
+});
+
 ipcMain.handle("db:backup", async () => {
   const choice = await dialog.showSaveDialog({
     title: "Simpan Backup SBP Accounting",
