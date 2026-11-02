@@ -655,8 +655,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     let printStyle=document.getElementById("sbp-print-page-style");
     if(!printStyle){printStyle=document.createElement("style");printStyle.id="sbp-print-page-style";document.head.appendChild(printStyle);}
     const orientation=String(s.orientation||"Auto").toLowerCase();
-    const pageSize=(s.paper||"F4")+" "+(orientation==="auto"?"portrait":orientation);
-    printStyle.textContent="@page { size: "+pageSize+"; margin: 12mm; } body::before { content: "+JSON.stringify([s.company,s.header].filter(Boolean).join(" · "))+"; display:block; font-weight:700; text-align:center; margin-bottom:10px; }";
+    const paper=String(s.paper||"F4").toUpperCase();
+    let dimensions=paper==="A4"?[210,297]:paper==="LETTER"?[216,279]:[210,330];
+    if(orientation==="landscape")dimensions.reverse();
+    const pageSize=dimensions[0]+"mm "+dimensions[1]+"mm";
+    const printHead=[s.company,s.header].filter(Boolean).join(" · ");
+    const signature=s.signature==="false"?"":" body::after { content: 'Mengetahui,\\\\A\\\\A\\\\A(____________________)'; white-space:pre; display:block; text-align:right; margin-top:28px; }";
+    const pageNo=s.page_number==="false"?"":" @page { @bottom-right { content: counter(page); } }";
+    printStyle.textContent="@page { size: "+pageSize+"; margin: 12mm; } body::before { content: "+JSON.stringify(printHead)+"; display:block; font-weight:700; text-align:center; margin-bottom:10px; }"+signature+pageNo;
   }
   $("print-save").addEventListener("click",async()=>{
     try{await window.sbpDesktop.savePrintSettings({paper:$("print-paper").value,orientation:$("print-orientation").value,company:$("print-company").value,header:$("print-header").value,signature:String($("print-signature").checked),summary:String($("print-summary").checked),page_number:String($("print-page-number").checked)});
