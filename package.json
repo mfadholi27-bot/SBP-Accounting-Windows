@@ -15,7 +15,8 @@
     "electron-builder": "23.6.0"
   },
   "dependencies": {
-    "sql.js": "1.10.3"
+    "sql.js": "1.10.3",
+    "xlsx": "0.18.5"
   },
   "build": {
     "appId": "id.sbp.accounting.windows",
@@ -41,7 +42,10 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["ia32", "x64"]
+          "arch": [
+            "ia32",
+            "x64"
+          ]
         }
       ]
     },
