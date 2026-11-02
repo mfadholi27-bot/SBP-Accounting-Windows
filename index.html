@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SBP Accounting Windows V20</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">SBP</div><div><strong>SBP Accounting</strong><small>Windows V20</small></div></div>
+    <div class="nav-label">MENU UTAMA</div>
+    <button class="nav-item active">▦ <span>Dashboard</span></button>
+    <button class="nav-item">▤ <span>Master Akun</span></button>
+    <button class="nav-item">⇄ <span>Jurnal Maintenance</span></button>
+    <button class="nav-item">▣ <span>Saldo Awal ACC & Program</span></button>
+    <button class="nav-item">◷ <span>Anggaran per Akun</span></button>
+    <div class="nav-label">LAPORAN</div>
+    <button class="nav-item">▥ <span>Buku Besar</span></button>
+    <button class="nav-item">▧ <span>Neraca Percobaan</span></button>
+    <button class="nav-item">▤ <span>Laporan Keuangan</span></button>
+    <div class="sidebar-bottom">MODE OFFLINE <span class="status-dot"></span></div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div><div class="eyebrow">SISTEM PEMBUKUAN</div><h1>Dashboard</h1></div>
+      <div class="top-actions"><span class="offline-pill"><i></i> Offline</span><button id="backupBtn" class="button secondary">Buat Backup</button></div>
+    </header>
+    <section class="welcome">
+      <div><span class="eyebrow light">SELAMAT DATANG</span><h2>SBP Accounting Windows</h2><p>Fondasi aplikasi desktop sedang disiapkan. Data tersimpan secara lokal di komputer ini.</p></div>
+      <div class="welcome-badge">V20</div>
+    </section>
+    <section class="cards">
+      <article class="metric"><span>Total Akun</span><strong>—</strong><small>Menunggu impor master akun</small></article>
+      <article class="metric"><span>Jurnal Draft</span><strong>—</strong><small>Belum ada transaksi</small></article>
+      <article class="metric"><span>Jurnal Posted</span><strong>—</strong><small>Belum ada transaksi</small></article>
+      <article class="metric"><span>Status Database</span><strong class="good">AKTIF</strong><small>SQLite lokal</small></article>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><h3>Status Fondasi Aplikasi</h3><p>Modul akuntansi akan diintegrasikan setelah audit struktur V19.</p></div><span class="tag">TAHAP 1</span></div>
+      <div class="status-list">
+        <div><span class="check">✓</span><span><b>Kerangka desktop Electron</b><small>Jendela aplikasi dan pemisahan proses utama/renderer.</small></span><em>Siap awal</em></div>
+        <div><span class="check">✓</span><span><b>Database lokal SQLite</b><small>File database disimpan di profil pengguna Windows.</small></span><em>Siap awal</em></div>
+        <div><span class="pending">•</span><span><b>Migrasi data V19</b><small>Menunggu audit format penyimpanan dan struktur data asli.</small></span><em>Belum dimulai</em></div>
+        <div><span class="pending">•</span><span><b>Pengujian Windows 7 x86</b><small>Perlu build khusus dan pengujian lingkungan target.</small></span><em>Belum diuji</em></div>
+      </div>
+    </section>
+    <footer>SBP Accounting Windows V20 · Proyek mandiri · Tidak terhubung ke SBP Accounting V19</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "name": "sbp-accounting-windows",
+  "version": "20.0.0",
+  "description": "SBP Accounting Windows - isolated desktop project",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:x86": "electron-builder --win nsis --ia32",
+    "dist:x64": "electron-builder --win nsis --x64",
+    "dist:all": "electron-builder --win nsis --ia32 --x64"
+  },
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "23.6.0"
+  },
+  "dependencies": {
+    "sql.js": "1.10.3"
+  },
+  "build": {
+    "appId": "id.sbp.accounting.windows",
+    "productName": "SBP Accounting Windows",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/sql.js/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["ia32", "x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
