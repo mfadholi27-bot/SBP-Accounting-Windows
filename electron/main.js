@@ -543,9 +543,11 @@ ipcMain.handle("debit-notes:post",(_e,idValue)=>{
  }catch(e){db.run("ROLLBACK");throw e;}
 });
 ipcMain.handle("debit-notes:cancel",(_e,p={})=>{
- const id=Number(p.id),reason=String(p.reason||"").trim(),n=rows("SELECT * FROM debit_notes WHERE id=?",[id])[0];if(!n||n.status==="CANCELLED"||!reason)throw new Error("Nota tidak valid atau alasan pembatalan kosong.");
+ const id=Number(p.id),reason=String(p.reason||"").trim(),n=rows("SELECT * FROM debit_notes WHERE id=?",[id])[0];
+ if(!n||n.status==="CANCELLED"||!reason)throw new Error("Nota tidak valid atau alasan pembatalan kosong.");
+ if(n.status==="POSTED"||n.linked_journal_id)throw new Error("Nota yang sudah POSTED tidak boleh dibatalkan langsung karena jurnal tertaut sudah masuk pembukuan. Buat jurnal pembalik/koreksi terlebih dahulu.");
  if(periodIsClosed(n.note_date))throw new Error("Periode sudah ditutup.");
- db.run("UPDATE debit_notes SET status='CANCELLED',cancelled_at=CURRENT_TIMESTAMP,cancel_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",[reason,id]);audit("CANCEL_DEBIT_NOTE","DEBIT_NOTE",id,"Nota dibatalkan: "+reason);saveDb();return {ok:true};
+ db.run("BEGIN IMMEDIATE");try{db.run("UPDATE debit_notes SET status='CANCELLED',cancelled_at=CURRENT_TIMESTAMP,cancel_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",[reason,id]);audit("CANCEL_DEBIT_NOTE","DEBIT_NOTE",id,"Nota Draft dibatalkan: "+reason);db.run("COMMIT");saveDb();return {ok:true};}catch(e){db.run("ROLLBACK");throw e;}
 });
 
 ipcMain.handle("periods:list",()=>rows("SELECT * FROM accounting_periods ORDER BY period_key DESC"));
@@ -647,6 +649,46 @@ ipcMain.handle("reports:income-summary",(_e,p={})=>{
  FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id JOIN accounts a ON a.sandi=l.sandi
  WHERE h.status='POSTED' AND h.journal_date BETWEEN ? AND ? GROUP BY a.sandi,a.account_name,a.account_type,a.normal_balance ORDER BY a.sandi`,[from,to]);
 });
+
+ipcMain.handle("reports:income-statement",(_e,p={})=>{
+ const from=String(p.date_from||""),to=String(p.date_to||"");
+ if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal laporan laba rugi tidak valid.");
+ const rowsOut=rows(`SELECT a.sandi,a.account_name,a.account_type,a.normal_balance,
+ COALESCE(SUM(l.debit),0) debit,COALESCE(SUM(l.credit),0) credit
+ FROM accounts a JOIN journal_lines l ON l.sandi=a.sandi JOIN journal_headers h ON h.id=l.journal_id
+ WHERE h.status='POSTED' AND h.journal_date BETWEEN ? AND ? AND UPPER(COALESCE(a.account_type,'')) IN ('PENDAPATAN','BEBAN')
+ GROUP BY a.sandi,a.account_name,a.account_type,a.normal_balance ORDER BY a.account_type,a.sandi`,[from,to]);
+ const result=rowsOut.map(x=>({...x,net: String(x.account_type).toUpperCase()==="PENDAPATAN"?Number(x.credit)-Number(x.debit):Number(x.debit)-Number(x.credit)}));
+ const revenue=result.filter(x=>String(x.account_type).toUpperCase()==="PENDAPATAN").reduce((s,x)=>s+x.net,0);
+ const expense=result.filter(x=>String(x.account_type).toUpperCase()==="BEBAN").reduce((s,x)=>s+x.net,0);
+ return {rows:result,revenue,expense,netProfit:revenue-expense,dateFrom:from,dateTo:to};
+});
+ipcMain.handle("reports:balance-sheet",(_e,p={})=>{
+ const date=String(p.as_of||"");
+ if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error("Tanggal posisi neraca tidak valid.");
+ const rowsOut=rows(`SELECT a.sandi,a.account_name,a.account_type,a.normal_balance,
+ COALESCE(o.debit,0) opening_debit,COALESCE(o.credit,0) opening_credit,
+ COALESCE(m.debit,0) movement_debit,COALESCE(m.credit,0) movement_credit
+ FROM accounts a
+ LEFT JOIN (SELECT sandi,SUM(debit) debit,SUM(credit) credit FROM opening_balances WHERE period_key<=? GROUP BY sandi) o ON o.sandi=a.sandi
+ LEFT JOIN (SELECT l.sandi,SUM(l.debit) debit,SUM(l.credit) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE h.status='POSTED' AND h.journal_date<=? GROUP BY l.sandi) m ON m.sandi=a.sandi
+ WHERE UPPER(COALESCE(a.account_type,'')) IN ('ASET','KEWAJIBAN','EKUITAS') AND (o.sandi IS NOT NULL OR m.sandi IS NOT NULL)
+ ORDER BY CASE UPPER(a.account_type) WHEN 'ASET' THEN 1 WHEN 'KEWAJIBAN' THEN 2 ELSE 3 END,a.sandi`,[date.slice(0,7),date]);
+ const result=rowsOut.map(x=>{const net=Number(x.opening_debit||0)-Number(x.opening_credit||0)+Number(x.movement_debit||0)-Number(x.movement_credit||0);const type=String(x.account_type).toUpperCase();return {...x,net,display_balance:type==="ASET"?net:-net};});
+ const total=type=>result.filter(x=>String(x.account_type).toUpperCase()===type).reduce((s,x)=>s+x.display_balance,0);
+ const assets=total("ASET"),liabilities=total("KEWAJIBAN"),equity=total("EKUITAS");
+ return {rows:result,assets,liabilities,equity,liabilitiesEquity:liabilities+equity,difference:assets-liabilities-equity,asOf:date};
+});
+ipcMain.handle("audit:export",async(_e,p={})=>{
+ const items=rows("SELECT occurred_at,actor,action,entity_type,entity_id,summary,before_json,after_json,correlation_id FROM audit_logs ORDER BY id");
+ if(!items.length)throw new Error("Belum ada data audit untuk diekspor.");
+ const csvCell=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+ const csv=["WAKTU,PELAKU,AKSI,ENTITAS,ID ENTITAS,RINGKASAN,SEBELUM,SESUDAH,KORELASI",...items.map(x=>[x.occurred_at,x.actor,x.action,x.entity_type,x.entity_id,x.summary,x.before_json,x.after_json,x.correlation_id].map(csvCell).join(","))].join("\r\n");
+ const choice=await dialog.showSaveDialog({title:"Ekspor Audit Log",defaultPath:"SBP-Audit-"+new Date().toISOString().slice(0,10)+".csv",filters:[{name:"CSV",extensions:["csv"]}]});
+ if(choice.canceled||!choice.filePath)return {canceled:true};
+ fs.writeFileSync(choice.filePath,"\\uFEFF"+csv,"utf8");audit("EXPORT_AUDIT","AUDIT",choice.filePath,"Ekspor "+items.length+" baris audit.");saveDb();return {ok:true,count:items.length,path:choice.filePath};
+});
+
 ipcMain.handle("validation:run",()=>{
  const issues=[];
  rows("SELECT voucher_number,COUNT(*) n FROM journal_headers GROUP BY voucher_number HAVING COUNT(*)>1").forEach(x=>issues.push({severity:"ERROR",code:"DUPLICATE_VOUCHER",detail:"Nomor bukti "+x.voucher_number+" terduplikasi ("+x.n+")."}));
@@ -675,8 +717,16 @@ ipcMain.handle("archive:list",()=>rows("SELECT * FROM archive_records ORDER BY c
 ipcMain.handle("archive:read",async(_e,p={})=>{
  const choice=await dialog.showOpenDialog({title:"Buka Arsip SBP Accounting",properties:["openFile"],filters:[{name:"SBP Archive",extensions:["json"]}]});
  if(choice.canceled||!choice.filePaths[0])return {canceled:true};
- const data=JSON.parse(fs.readFileSync(choice.filePaths[0],"utf8"));if(data.version!==1||!Array.isArray(data.journals))throw new Error("Format arsip tidak dikenali.");
- return {ok:true,metadata:{createdAt:data.createdAt,dateFrom:data.dateFrom,dateTo:data.dateTo,journalCount:data.journals.length,accountCount:(data.accounts||[]).length},data};
+ const filePath=choice.filePaths[0],raw=fs.readFileSync(filePath,"utf8");
+ let data;try{data=JSON.parse(raw);}catch(e){throw new Error("File arsip bukan JSON yang valid: "+e.message);}
+ if(data.version!==1||!Array.isArray(data.journals))throw new Error("Format arsip tidak dikenali.");
+ const record=rows("SELECT metadata_json FROM archive_records WHERE file_path=? ORDER BY id DESC LIMIT 1",[filePath])[0];
+ if(record&&record.metadata_json){
+   let meta={};try{meta=JSON.parse(record.metadata_json);}catch(_){}
+   if(meta.sha256){const actual=crypto.createHash("sha256").update(raw,"utf8").digest("hex");if(actual!==meta.sha256)throw new Error("VERIFIKASI GAGAL: checksum SHA-256 arsip berubah atau file rusak. Data tidak dibuka.");}
+ }
+ const journalLines=data.journals.reduce((n,j)=>n+(Array.isArray(j.lines)?j.lines.length:0),0);
+ return {ok:true,verified:Boolean(record&&record.metadata_json&&JSON.parse(record.metadata_json).sha256),metadata:{createdAt:data.createdAt,dateFrom:data.dateFrom,dateTo:data.dateTo,journalCount:data.journals.length,journalLineCount:journalLines,accountCount:(data.accounts||[]).length},data};
 });
 ipcMain.handle("db:restore",async()=>{
  const choice=await dialog.showOpenDialog({title:"Pilih Backup Database untuk Dipulihkan",properties:["openFile"],filters:[{name:"SQLite Database",extensions:["db"]}]});
