@@ -662,7 +662,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const printHead=[s.company,s.header].filter(Boolean).join(" · ");
     const signature=s.signature==="false"?"":" body::after { content: 'Mengetahui,\\\\A\\\\A\\\\A(____________________)'; white-space:pre; display:block; text-align:right; margin-top:28px; }";
     const pageNo=s.page_number==="false"?"":" @page { @bottom-right { content: counter(page); } }";
-    printStyle.textContent="@page { size: "+pageSize+"; margin: 12mm; } body::before { content: "+JSON.stringify(printHead)+"; display:block; font-weight:700; text-align:center; margin-bottom:10px; }"+signature+pageNo;
+    printStyle.textContent="@media print { @page { size: "+pageSize+"; margin: 12mm; } body::before { content: "+JSON.stringify(printHead)+"; display:block; font-weight:700; text-align:center; margin-bottom:10px; }"+signature+pageNo+" }";
   }
   $("print-save").addEventListener("click",async()=>{
     try{await window.sbpDesktop.savePrintSettings({paper:$("print-paper").value,orientation:$("print-orientation").value,company:$("print-company").value,header:$("print-header").value,signature:String($("print-signature").checked),summary:String($("print-summary").checked),page_number:String($("print-page-number").checked)});
