@@ -585,6 +585,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       $("ledger-message").textContent=list.length+" transaksi POSTED ditampilkan.";
     }catch(e){$("ledger-message").textContent=e.message;}
   });
+$("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger-rows").querySelectorAll("tr")).map(tr=>Array.from(tr.children).map(td=>td.textContent));if(!rows.length||rows[0].length!==6){alert("Tampilkan Buku Besar terlebih dahulu.");return;}const csv=[["Tanggal","Nomor Bukti","Keterangan","Debit","Kredit","Saldo"],...rows].map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\\r\\n");const blob=new Blob(["\\uFEFF"+csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="Buku-Besar-"+$("ledger-account").value+".csv";a.click();URL.revokeObjectURL(url);});
+  $("ledger-print").addEventListener("click",()=>window.print());
   $("report-trial-run").addEventListener("click",async()=>{
     try{const list=await window.sbpDesktop.trialBalance({period_key:$("report-period").value});
       let debit=0,credit=0;
@@ -645,27 +647,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     }catch(e){$("admin-correction-message").textContent=e.message;$("admin-correction-message").className="import-message error";}
   });
   let debitNoteLines=[];
+  let editingDebitNoteId=0;
   function renderDebitNoteLines(){
     $("dn-lines").innerHTML=debitNoteLines.map((x,i)=>'<tr><td><select data-dn-account="'+i+'">'+adminOptions(x.sandi)+'</select></td><td><input data-dn-description="'+i+'" value="'+escapeHtml(x.description||"")+'"></td><td><input type="number" min="0" step="0.01" data-dn-debit="'+i+'" value="'+(x.debit||"")+'"></td><td><input type="number" min="0" step="0.01" data-dn-credit="'+i+'" value="'+(x.credit||"")+'"></td><td><button class="small-action danger" data-dn-remove="'+i+'">Hapus</button></td></tr>').join("");
   }
   function addDebitNoteLine(){debitNoteLines.push({sandi:"",description:"",debit:0,credit:0});renderDebitNoteLines();}
   $("dn-add-line").addEventListener("click",addDebitNoteLine);
-  $("dn-new").addEventListener("click",()=>{$("dn-number").value="";$("dn-date").value=new Date().toISOString().slice(0,10);$("dn-partner").value="";$("dn-type").value="";$("dn-invoice").value="";$("dn-description").value="";debitNoteLines=[];addDebitNoteLine();addDebitNoteLine();});
+  $("dn-new").addEventListener("click",()=>{editingDebitNoteId=0;$("dn-number").value="";$("dn-date").value=new Date().toISOString().slice(0,10);$("dn-partner").value="";$("dn-type").value="";$("dn-invoice").value="";$("dn-description").value="";debitNoteLines=[];addDebitNoteLine();addDebitNoteLine();});
   $("dn-lines").addEventListener("input",e=>{const el=e.target,idx=Number(el.dataset.dnDescription??el.dataset.dnDebit??el.dataset.dnCredit);if(!Number.isInteger(idx)||!debitNoteLines[idx])return;if(el.dataset.dnDescription!==undefined)debitNoteLines[idx].description=el.value;if(el.dataset.dnDebit!==undefined)debitNoteLines[idx].debit=Number(el.value||0);if(el.dataset.dnCredit!==undefined)debitNoteLines[idx].credit=Number(el.value||0);});
   $("dn-lines").addEventListener("change",e=>{if(e.target.dataset.dnAccount!==undefined)debitNoteLines[Number(e.target.dataset.dnAccount)].sandi=e.target.value;});
   $("dn-lines").addEventListener("click",e=>{const b=e.target.closest("[data-dn-remove]");if(!b)return;debitNoteLines.splice(Number(b.dataset.dnRemove),1);renderDebitNoteLines();});
   async function refreshDebitNotes(){
     const list=await window.sbpDesktop.listDebitNotes({});
-    $("dn-list").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.note_number)+'</td><td>'+escapeHtml(x.note_date)+'</td><td>'+escapeHtml(x.partner_name)+'</td><td>'+escapeHtml(x.description)+'</td><td>'+escapeHtml(x.status)+'</td><td>'+(x.status==="DRAFT"?'<button class="small-action" data-dn-post="'+x.id+'">Posting</button> <button class="small-action danger" data-dn-cancel="'+x.id+'">Batal</button>':'—')+'</td></tr>').join(""):'<tr><td colspan="6" class="empty">Belum ada nota debet.</td></tr>';
+    $("dn-list").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.note_number)+'</td><td>'+escapeHtml(x.note_date)+'</td><td>'+escapeHtml(x.partner_name)+'</td><td>'+escapeHtml(x.description)+'</td><td>'+escapeHtml(x.status)+'</td><td>'+(x.status==="DRAFT"?'<button class="small-action" data-dn-edit="'+x.id+'">Edit</button> <button class="small-action" data-dn-post="'+x.id+'">Posting</button> <button class="small-action danger" data-dn-cancel="'+x.id+'">Batal</button>':'—')+'</td></tr>').join(""):'<tr><td colspan="6" class="empty">Belum ada nota debet.</td></tr>';
   }
   $("dn-save").addEventListener("click",async()=>{
-    try{const r=await window.sbpDesktop.saveDebitNote({note_number:$("dn-number").value,note_date:$("dn-date").value,note_type:$("dn-type").value,partner_name:$("dn-partner").value,invoice_reference:$("dn-invoice").value,description:$("dn-description").value,lines:debitNoteLines});
-      $("dn-message").textContent="Draft nota debet tersimpan (ID "+r.id+").";$("dn-message").className="import-message success";await refreshDebitNotes();
+    try{const r=await window.sbpDesktop.saveDebitNote({id:editingDebitNoteId,note_number:$("dn-number").value,note_date:$("dn-date").value,note_type:$("dn-type").value,partner_name:$("dn-partner").value,invoice_reference:$("dn-invoice").value,description:$("dn-description").value,lines:debitNoteLines});
+      editingDebitNoteId=r.id;$("dn-message").textContent="Draft nota debet tersimpan (ID "+r.id+").";$("dn-message").className="import-message success";await refreshDebitNotes();
     }catch(e){$("dn-message").textContent=e.message;$("dn-message").className="import-message error";}
   });
   $("dn-list").addEventListener("click",async e=>{
-    const post=e.target.closest("[data-dn-post]"),cancel=e.target.closest("[data-dn-cancel]");
-    try{if(post){await window.sbpDesktop.postDebitNote(Number(post.dataset.dnPost));}else if(cancel){const reason=prompt("Alasan pembatalan nota?");if(!reason)return;await window.sbpDesktop.cancelDebitNote({id:Number(cancel.dataset.dnCancel),reason});}else return;await refreshDebitNotes();await refreshSummary();}
+    const post=e.target.closest("[data-dn-post]"),cancel=e.target.closest("[data-dn-cancel]"),edit=e.target.closest("[data-dn-edit]");
+    try{if(edit){const item=(await window.sbpDesktop.listDebitNotes({})).find(x=>Number(x.id)===Number(edit.dataset.dnEdit));if(!item)return;editingDebitNoteId=item.id;$("dn-number").value=item.note_number;$("dn-date").value=item.note_date;$("dn-partner").value=item.partner_name;$("dn-type").value=item.note_type||"";$("dn-invoice").value=item.invoice_reference||"";$("dn-description").value=item.description;debitNoteLines=item.lines.map(x=>({sandi:x.sandi,description:x.description||"",debit:Number(x.debit||0),credit:Number(x.credit||0)}));renderDebitNoteLines();$("dn-message").textContent="Mengedit draft nota "+item.note_number;}else if(post){await window.sbpDesktop.postDebitNote(Number(post.dataset.dnPost));}else if(cancel){const reason=prompt("Alasan pembatalan nota?");if(!reason)return;await window.sbpDesktop.cancelDebitNote({id:Number(cancel.dataset.dnCancel),reason});if(editingDebitNoteId===Number(cancel.dataset.dnCancel))editingDebitNoteId=0;}else return;await refreshDebitNotes();await refreshSummary();}
     catch(err){alert(err.message);}
   });
   async function refreshPrintSettings(){
@@ -704,6 +707,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }catch(e){$("archive-reader-summary").textContent="Gagal membuka arsip: "+e.message;}
   });
   $("backup-now").addEventListener("click",async()=>{try{const r=await window.sbpDesktop.backup();$("backup-message").textContent=r.canceled?"Backup dibatalkan.":"Backup database berhasil disimpan.";$("backup-message").className="import-message success";}catch(e){$("backup-message").textContent=e.message;$("backup-message").className="import-message error";}});
+  $("backup-auto-now").addEventListener("click",async()=>{try{const r=await window.sbpDesktop.automaticBackup();$("backup-message").textContent=r.created?"Backup otomatis dibuat: "+r.path:"Backup hari ini sudah tersedia: "+r.path;$("backup-message").className="import-message success";}catch(e){$("backup-message").textContent=e.message;$("backup-message").className="import-message error";}});
   $("restore-now").addEventListener("click",async()=>{if(!confirm("Restore akan mengganti database aktif dengan file backup. Database saat ini akan diamankan terlebih dahulu. Lanjutkan?"))return;try{const r=await window.sbpDesktop.restoreDatabase();$("backup-message").textContent=r.canceled?"Restore dibatalkan.":"Restore berhasil. Backup keselamatan: "+r.safetyBackup+". Tutup dan buka ulang aplikasi."; $("backup-message").className="import-message success";}catch(e){$("backup-message").textContent=e.message;$("backup-message").className="import-message error";}});
   async function loadAdminModules(){
     await fillAdminAccounts();await refreshPeriods();await refreshDebitNotes();await refreshAudit();await refreshArchives();await refreshPrintSettings();
