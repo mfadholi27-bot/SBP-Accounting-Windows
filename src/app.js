@@ -564,6 +564,112 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
 
+
+  // Integrated A/B/C module controllers.
+  function adminOptions(selected=""){return '<option value="">Pilih SANDI</option>'+journalAccounts.map(a=>'<option value="'+escapeHtml(a.sandi)+'" '+(a.sandi===selected?'selected':'')+'>'+escapeHtml(a.sandi+" — "+a.account_name)+'</option>').join("");}
+  async function refreshPeriods(){
+    const list=await window.sbpDesktop.listPeriods();
+    $("period-rows").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.period_key)+'</td><td><span class="status-pill '+(x.status==="CLOSED"?"off":"on")+'">'+x.status+'</span></td><td>'+escapeHtml(x.opened_at||"—")+'</td><td>'+escapeHtml(x.closed_at||"—")+'</td><td>'+(x.status==="CLOSED"?'<button class="small-action" data-reopen="'+escapeHtml(x.period_key)+'">Buka Kembali</button>':'Aktif')+'</td></tr>').join(""):'<tr><td colspan="5" class="empty">Belum ada periode.</td></tr>';
+  }
+  $("period-open").addEventListener("click",async()=>{try{await window.sbpDesktop.openPeriod({period_key:$("period-key").value});$("period-message").textContent="Periode dibuka/diaktifkan.";$("period-message").className="import-message success";await refreshPeriods();}catch(e){$("period-message").textContent=e.message;}});
+  $("period-close").addEventListener("click",async()=>{try{const r=await window.sbpDesktop.closePeriod({period_key:$("period-key").value,note:$("period-note").value});$("period-message").textContent="Periode ditutup. Jurnal POSTED: "+r.snapshot.postedJournalCount+"."; $("period-message").className="import-message success";await refreshPeriods();}catch(e){$("period-message").textContent=e.message;$("period-message").className="import-message error";}});
+  $("period-rows").addEventListener("click",async e=>{const b=e.target.closest("[data-reopen]");if(!b)return;const reason=prompt("Alasan membuka kembali periode "+b.dataset.reopen+"?");if(!reason)return;try{await window.sbpDesktop.reopenPeriod({period_key:b.dataset.reopen,reason});await refreshPeriods();}catch(err){alert(err.message);}});
+  async function fillAdminAccounts(){
+    journalAccounts=await window.sbpDesktop.listAccounts("");
+    $("ledger-account").innerHTML=adminOptions();
+  }
+  $("ledger-run").addEventListener("click",async()=>{
+    try{const list=await window.sbpDesktop.ledgerReport({sandi:$("ledger-account").value,date_from:$("ledger-from").value,date_to:$("ledger-to").value});
+      $("ledger-rows").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.journal_date)+'</td><td>'+escapeHtml(x.voucher_number)+'</td><td>'+escapeHtml(x.line_description||x.journal_description)+'</td><td>'+money(x.debit)+'</td><td>'+money(x.credit)+'</td><td>'+money(x.running_balance)+'</td></tr>').join(""):'<tr><td colspan="6" class="empty">Tidak ada transaksi POSTED pada rentang ini.</td></tr>';
+      $("ledger-message").textContent=list.length+" transaksi POSTED ditampilkan.";
+    }catch(e){$("ledger-message").textContent=e.message;}
+  });
+  $("report-trial-run").addEventListener("click",async()=>{
+    try{const list=await window.sbpDesktop.trialBalance({period_key:$("report-period").value});
+      let debit=0,credit=0;
+      $("trial-balance-rows").innerHTML=list.map(x=>{
+        const net=Number(x.net_balance||0),endD=Math.max(0,net),endC=Math.max(0,-net);
+        debit+=endD;credit+=endC;
+        return '<tr><td>'+escapeHtml(x.sandi)+'</td><td>'+escapeHtml(x.account_name)+'</td><td>'+money(x.opening_debit)+'</td><td>'+money(x.opening_credit)+'</td><td>'+money(x.movement_debit)+'</td><td>'+money(x.movement_credit)+'</td><td>'+money(endD)+'</td><td>'+money(endC)+'</td></tr>';
+      }).join("");
+      $("report-summary").textContent="Total saldo akhir debit "+money(debit)+" · kredit "+money(credit)+" · selisih "+money(debit-credit)+". "+(Math.abs(debit-credit)<0.005?"SEIMBANG":"BELUM SEIMBANG");
+      $("report-summary").className="import-message "+(Math.abs(debit-credit)<0.005?"success":"error");
+    }catch(e){$("report-summary").textContent=e.message;}
+  });
+  $("report-print").addEventListener("click",()=>window.print());
+  $("validation-run").addEventListener("click",async()=>{
+    try{const issues=await window.sbpDesktop.runValidation();
+      $("validation-summary").textContent=issues.length?issues.length+" temuan ditemukan.":"Tidak ada temuan pada pemeriksaan yang tersedia.";
+      $("validation-summary").className="import-message "+(issues.some(x=>x.severity==="ERROR")?"error":"success");
+      $("validation-rows").innerHTML=issues.length?issues.map(x=>'<tr><td>'+escapeHtml(x.severity)+'</td><td>'+escapeHtml(x.code)+'</td><td>'+escapeHtml(x.detail)+'</td></tr>').join(""):'<tr><td colspan="3" class="empty">Semua pemeriksaan lulus.</td></tr>';
+    }catch(e){$("validation-summary").textContent=e.message;}
+  });
+  async function refreshAudit(){
+    const list=await window.sbpDesktop.listAudit({limit:500});
+    $("audit-rows").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.occurred_at)+'</td><td>'+escapeHtml(x.action)+'</td><td>'+escapeHtml(x.entity_type)+'</td><td>'+escapeHtml(x.entity_id)+'</td><td>'+escapeHtml(x.summary)+'</td></tr>').join(""):'<tr><td colspan="5" class="empty">Belum ada catatan audit.</td></tr>';
+  }
+  $("audit-refresh").addEventListener("click",refreshAudit);
+  $("admin-reverse").addEventListener("click",async()=>{
+    try{const r=await window.sbpDesktop.reverseJournal({id:Number($("admin-journal-id").value),voucher_number:$("admin-reversal-voucher").value,journal_date:$("admin-reversal-date").value,reason:$("admin-reversal-reason").value});
+      $("admin-message").textContent="Jurnal pembalik POSTED berhasil dibuat. ID "+r.id+".";
+      $("admin-message").className="import-message success";
+      await refreshSummary();
+    }catch(e){$("admin-message").textContent=e.message;$("admin-message").className="import-message error";}
+  });
+  let debitNoteLines=[];
+  function renderDebitNoteLines(){
+    $("dn-lines").innerHTML=debitNoteLines.map((x,i)=>'<tr><td><select data-dn-account="'+i+'">'+adminOptions(x.sandi)+'</select></td><td><input data-dn-description="'+i+'" value="'+escapeHtml(x.description||"")+'"></td><td><input type="number" min="0" step="0.01" data-dn-debit="'+i+'" value="'+(x.debit||"")+'"></td><td><input type="number" min="0" step="0.01" data-dn-credit="'+i+'" value="'+(x.credit||"")+'"></td><td><button class="small-action danger" data-dn-remove="'+i+'">Hapus</button></td></tr>').join("");
+  }
+  function addDebitNoteLine(){debitNoteLines.push({sandi:"",description:"",debit:0,credit:0});renderDebitNoteLines();}
+  $("dn-add-line").addEventListener("click",addDebitNoteLine);
+  $("dn-new").addEventListener("click",()=>{$("dn-number").value="";$("dn-date").value=new Date().toISOString().slice(0,10);$("dn-partner").value="";$("dn-type").value="";$("dn-invoice").value="";$("dn-description").value="";debitNoteLines=[];addDebitNoteLine();addDebitNoteLine();});
+  $("dn-lines").addEventListener("input",e=>{const el=e.target,idx=Number(el.dataset.dnDescription??el.dataset.dnDebit??el.dataset.dnCredit);if(!Number.isInteger(idx)||!debitNoteLines[idx])return;if(el.dataset.dnDescription!==undefined)debitNoteLines[idx].description=el.value;if(el.dataset.dnDebit!==undefined)debitNoteLines[idx].debit=Number(el.value||0);if(el.dataset.dnCredit!==undefined)debitNoteLines[idx].credit=Number(el.value||0);});
+  $("dn-lines").addEventListener("change",e=>{if(e.target.dataset.dnAccount!==undefined)debitNoteLines[Number(e.target.dataset.dnAccount)].sandi=e.target.value;});
+  $("dn-lines").addEventListener("click",e=>{const b=e.target.closest("[data-dn-remove]");if(!b)return;debitNoteLines.splice(Number(b.dataset.dnRemove),1);renderDebitNoteLines();});
+  async function refreshDebitNotes(){
+    const list=await window.sbpDesktop.listDebitNotes({});
+    $("dn-list").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.note_number)+'</td><td>'+escapeHtml(x.note_date)+'</td><td>'+escapeHtml(x.partner_name)+'</td><td>'+escapeHtml(x.description)+'</td><td>'+escapeHtml(x.status)+'</td><td>'+(x.status==="DRAFT"?'<button class="small-action" data-dn-post="'+x.id+'">Posting</button> <button class="small-action danger" data-dn-cancel="'+x.id+'">Batal</button>':'—')+'</td></tr>').join(""):'<tr><td colspan="6" class="empty">Belum ada nota debet.</td></tr>';
+  }
+  $("dn-save").addEventListener("click",async()=>{
+    try{const r=await window.sbpDesktop.saveDebitNote({note_number:$("dn-number").value,note_date:$("dn-date").value,note_type:$("dn-type").value,partner_name:$("dn-partner").value,invoice_reference:$("dn-invoice").value,description:$("dn-description").value,lines:debitNoteLines});
+      $("dn-message").textContent="Draft nota debet tersimpan (ID "+r.id+").";$("dn-message").className="import-message success";await refreshDebitNotes();
+    }catch(e){$("dn-message").textContent=e.message;$("dn-message").className="import-message error";}
+  });
+  $("dn-list").addEventListener("click",async e=>{
+    const post=e.target.closest("[data-dn-post]"),cancel=e.target.closest("[data-dn-cancel]");
+    try{if(post){await window.sbpDesktop.postDebitNote(Number(post.dataset.dnPost));}else if(cancel){const reason=prompt("Alasan pembatalan nota?");if(!reason)return;await window.sbpDesktop.cancelDebitNote({id:Number(cancel.dataset.dnCancel),reason});}else return;await refreshDebitNotes();await refreshSummary();}
+    catch(err){alert(err.message);}
+  });
+  async function refreshPrintSettings(){
+    const s=Object.fromEntries((await window.sbpDesktop.getPrintSettings()).map(x=>[x.setting_key,x.setting_value]));
+    $("print-paper").value=s.paper||"F4";$("print-orientation").value=s.orientation||"Auto";$("print-company").value=s.company||"";$("print-header").value=s.header||"";
+    $("print-signature").checked=s.signature!=="false";$("print-summary").checked=s.summary!=="false";$("print-page-number").checked=s.page_number!=="false";
+  }
+  $("print-save").addEventListener("click",async()=>{
+    try{await window.sbpDesktop.savePrintSettings({paper:$("print-paper").value,orientation:$("print-orientation").value,company:$("print-company").value,header:$("print-header").value,signature:String($("print-signature").checked),summary:String($("print-summary").checked),page_number:String($("print-page-number").checked)});
+      $("print-message").textContent="Pengaturan cetak disimpan.";$("print-message").className="import-message success";
+    }catch(e){$("print-message").textContent=e.message;}
+  });
+  $("print-preview").addEventListener("click",()=>window.print());
+  async function refreshArchives(){
+    const list=await window.sbpDesktop.listArchives();
+    $("archive-rows").innerHTML=list.length?list.map(x=>'<tr><td>'+escapeHtml(x.archive_name)+'</td><td>'+escapeHtml(x.period_start)+' – '+escapeHtml(x.period_end)+'</td><td>'+escapeHtml(x.created_at)+'</td><td>'+escapeHtml(x.record_count)+'</td></tr>').join(""):'<tr><td colspan="4" class="empty">Belum ada arsip.</td></tr>';
+  }
+  $("archive-create").addEventListener("click",async()=>{
+    try{const r=await window.sbpDesktop.createArchive({date_from:$("archive-from").value,date_to:$("archive-to").value});if(r.canceled)return;$("archive-message").textContent="Arsip dibuat. Jumlah jurnal: "+r.recordCount+".";$("archive-message").className="import-message success";await refreshArchives();}
+    catch(e){$("archive-message").textContent=e.message;$("archive-message").className="import-message error";}
+  });
+  $("archive-read").addEventListener("click",async()=>{
+    try{const r=await window.sbpDesktop.readArchive();if(r.canceled)return;$("archive-reader-summary").textContent="Arsip "+r.metadata.dateFrom+" s.d. "+r.metadata.dateTo+" · "+r.metadata.journalCount+" jurnal · "+r.metadata.accountCount+" akun. Mode hanya baca.";
+      $("archive-reader-rows").innerHTML=r.data.journals.map(x=>'<tr><td>'+escapeHtml(x.journal_date)+'</td><td>'+escapeHtml(x.voucher_number)+'</td><td>'+escapeHtml(x.description)+'</td><td>'+escapeHtml(x.status)+'</td><td>'+x.lines.length+'</td></tr>').join("");
+    }catch(e){$("archive-reader-summary").textContent="Gagal membuka arsip: "+e.message;}
+  });
+  $("backup-now").addEventListener("click",async()=>{try{const r=await window.sbpDesktop.backup();$("backup-message").textContent=r.canceled?"Backup dibatalkan.":"Backup database berhasil disimpan.";$("backup-message").className="import-message success";}catch(e){$("backup-message").textContent=e.message;$("backup-message").className="import-message error";}});
+  $("restore-now").addEventListener("click",async()=>{if(!confirm("Restore akan mengganti database aktif dengan file backup. Database saat ini akan diamankan terlebih dahulu. Lanjutkan?"))return;try{const r=await window.sbpDesktop.restoreDatabase();$("backup-message").textContent=r.canceled?"Restore dibatalkan.":"Restore berhasil. Backup keselamatan: "+r.safetyBackup+". Tutup dan buka ulang aplikasi."; $("backup-message").className="import-message success";}catch(e){$("backup-message").textContent=e.message;$("backup-message").className="import-message error";}});
+  async function loadAdminModules(){
+    await fillAdminAccounts();await refreshPeriods();await refreshDebitNotes();await refreshAudit();await refreshArchives();await refreshPrintSettings();
+  }
+
   // Legacy Import Center: local XLSX/CSV/DBF parsing with explicit preview and approval.
   let pendingNptransBatch=null,pendingAccountBatch=null,pendingOpeningBatch=null;
   const importNorm=value=>String(value??"").trim().toUpperCase().replace(/[\\s_./-]+/g,"").replace(/[^A-Z0-9]/g,"");
