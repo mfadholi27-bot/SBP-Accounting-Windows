@@ -6,9 +6,9 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist:x86": "electron-builder --win nsis --ia32",
-    "dist:x64": "electron-builder --win nsis --x64",
-    "dist:all": "electron-builder --win nsis --ia32 --x64"
+    "dist:x86": "electron-builder --win nsis --ia32 --publish never",
+    "dist:x64": "electron-builder --win nsis --x64 --publish never",
+    "dist:all": "electron-builder --win nsis --ia32 --x64 --publish never"
   },
   "devDependencies": {
     "electron": "22.3.27",
