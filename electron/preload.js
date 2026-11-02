@@ -7,5 +7,8 @@ contextBridge.exposeInMainWorld("sbpDesktop", {
   listAccounts: (keyword) => ipcRenderer.invoke("accounts:list", keyword || ""),
   saveAccount: (account) => ipcRenderer.invoke("accounts:save", account),
   setAccountActive: (payload) => ipcRenderer.invoke("accounts:set-active", payload),
-  deleteAccount: (id) => ipcRenderer.invoke("accounts:delete", id)
+  deleteAccount: (id) => ipcRenderer.invoke("accounts:delete", id),
+  listJournals: (filters) => ipcRenderer.invoke("journals:list", filters || {}),
+  saveJournal: (journal) => ipcRenderer.invoke("journals:save", journal),
+  deleteDraftJournal: (id) => ipcRenderer.invoke("journals:delete-draft", id)
 });
