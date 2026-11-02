@@ -1,47 +1,26 @@
-name: Build Windows Installers
-
+name: Build SBP Accounting V19 Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [v19-desktop-foundation]
     paths:
-      - "electron/**"
-      - "src/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/build-windows.yml"
-
+      - 'electron/**'
+      - 'src/v19/**'
+      - 'package.json'
+      - '.github/workflows/build-windows.yml'
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [ia32, x64]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "16"
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build x86 installer
-        if: matrix.arch == 'ia32'
-        run: npm run dist:x86
-
-      - name: Build x64 installer
-        if: matrix.arch == 'x64'
-        run: npm run dist:x64
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+          node-version: 16
+          cache: npm
+      - run: npm install
+      - run: npm run dist:all
+      - uses: actions/upload-artifact@v4
         with:
-          name: SBP-Accounting-Windows-${{ matrix.arch }}
+          name: SBP-Accounting-V19-Windows-Installers
           path: release/*.exe
           if-no-files-found: error
-          retention-days: 14

@@ -1,7 +1,7 @@
 {
-  "name": "sbp-accounting-windows",
-  "version": "20.0.0",
-  "description": "SBP Accounting Windows - isolated desktop project",
+  "name": "sbp-accounting-v19-desktop",
+  "version": "19.0.0",
+  "description": "SBP Accounting V19 desktop wrapper - original V19 accounting core",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,51 +10,14 @@
     "dist:x64": "electron-builder --win nsis --x64 --publish never",
     "dist:all": "electron-builder --win nsis --ia32 --x64 --publish never"
   },
-  "devDependencies": {
-    "electron": "22.3.27",
-    "electron-builder": "23.6.0"
-  },
-  "dependencies": {
-    "sql.js": "1.10.3",
-    "xlsx": "0.18.5"
-  },
+  "devDependencies": { "electron": "22.3.27", "electron-builder": "23.6.0" },
   "build": {
-    "appId": "id.sbp.accounting.windows",
-    "productName": "SBP Accounting Windows",
+    "appId": "id.sbp.accounting.v19",
+    "productName": "SBP Accounting V19",
     "asar": true,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "electron/**/*",
-      "src/**/*",
-      "assets/**/*",
-      "node_modules/sql.js/**/*",
-      "package.json",
-      "node_modules/xlsx/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
-        "to": "sql-wasm.wasm"
-      }
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "ia32",
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
+    "directories": { "output": "release" },
+    "files": ["electron/**/*", "src/v19/**/*", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["ia32", "x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true, "perMachine": false }
   }
 }
