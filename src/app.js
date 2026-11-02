@@ -2,9 +2,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   const $ = (id) => document.getElementById(id);
   const navButtons = Array.from(document.querySelectorAll(".nav[data-view]"));
   const pageNames = {
-    dashboard: "Dashboard", accounts: "Master Akun", journals: "Jurnal Maintenance",
-    opening: "Saldo Awal ACC & Program", budget: "Anggaran per Akun",
-    ledger: "Buku Besar", trial: "Neraca Percobaan", reports: "Laporan Keuangan"
+    dashboard: "Dashboard",
+    journal: "Jurnal Maintenance",
+    "journal-list": "Daftar Jurnal",
+    "debit-notes": "Nota Debet",
+    accounts: "Sandi Perkiraan / Master Akun",
+    "opening-balances": "Saldo Awal ACC & Program",
+    "annual-budget": "Anggaran Tahunan",
+    periods: "Periode Akuntansi",
+    ledger: "Buku Besar",
+    reports: "Laporan Keuangan",
+    "import-center": "Import Center / NPTRANS",
+    validation: "Validasi Data",
+    "journal-admin": "Journal Admin",
+    "print-settings": "Pengaturan Cetak",
+    audit: "Audit Log",
+    archive: "Arsip Tahunan",
+    "archive-reader": "Pembaca Arsip",
+    backup: "Backup & Restore"
   };
 
   function showView(name) {
