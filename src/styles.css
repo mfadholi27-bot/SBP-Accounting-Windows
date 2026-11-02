@@ -51,3 +51,60 @@
 .journal-list-footer{display:flex;justify-content:space-between;gap:12px;color:#829087;font-size:11px;padding:13px 3px}
 @media(max-width:1100px){.journal-head-grid{grid-template-columns:1fr 1fr}.journal-description-field{grid-column:1/-1}.journal-filterbar{grid-template-columns:1fr 1fr}.journal-filterbar input:first-child{grid-column:1/-1}}
 @media(max-width:650px){.journal-form-panel{padding:16px}.journal-head-grid,.journal-total-grid{grid-template-columns:1fr}.journal-description-field{grid-column:auto}.journal-actions{flex-wrap:wrap}.journal-actions button{flex:1}.journal-lines-heading{align-items:flex-start;flex-direction:column}.journal-list-footer{flex-direction:column}}
+
+
+/* V20 annual budget + live journal control */
+.budget-hero{padding:22px 25px;background:linear-gradient(115deg,#e9f4ed,#f8fbf8);border-color:#dcebe0}
+.budget-hero h2{margin:9px 0 5px;color:#194b35;font-size:22px}
+.budget-hero p{margin:0;color:#73867a;font-size:12px}
+.budget-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0 18px}
+.budget-summary article{padding:16px 18px;background:#fff;border:1px solid #e2ebe5;border-radius:12px}
+.budget-summary span,.budget-summary small{display:block;color:#819087;font-size:10px}
+.budget-summary b{display:block;margin:7px 0;font-size:19px;color:#194b35;font-variant-numeric:tabular-nums}
+.budget-panel-head,.budget-month-head{display:flex;justify-content:space-between;align-items:center;gap:14px}
+.budget-panel-head h3,.budget-month-head h3{margin:0 0 5px;font-size:16px}
+.budget-panel-head p,.budget-month-head p{margin:0;color:#859188;font-size:11px}
+.budget-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
+.budget-form-grid label,.budget-month-grid label,.budget-filters label{display:grid;gap:7px;color:#64776b;font-size:11px;font-weight:700}
+.budget-form-grid input,.budget-form-grid select,.budget-month-grid input,.budget-filters input,.budget-filters select{width:100%;min-width:0;padding:10px 11px;border:1px solid #dce6df;border-radius:8px;background:#fff;color:#263b30;font:inherit}
+.budget-form-grid input[readonly]{background:#f6f9f7;color:#708178}
+.budget-month-head{margin:22px 0 12px}
+.budget-month-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.budget-validation{margin-top:15px;padding:11px 13px;border-radius:8px;background:#fff5e9;color:#94611b;font-size:11px}
+.budget-validation.good{background:#eaf7ef;color:#176c45}
+.budget-validation.warn{background:#fff5e9;color:#94611b}
+.budget-validation+ .journal-actions{margin-top:15px}
+.budget-filters{display:flex;align-items:end;gap:9px}
+.budget-filters input{width:210px}
+.budget-positive{color:#19865a}.budget-negative{color:#b34444}
+.journal-budget-panel{margin:22px 0 16px;padding:17px;border:1px solid #dfeae3;border-radius:12px;background:#fbfdfb}
+.journal-budget-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.journal-budget-heading h3{margin:0 0 4px;font-size:15px}
+.journal-budget-heading p{margin:0;color:#819087;font-size:11px}
+.budget-live-pill{padding:6px 9px;border-radius:20px;background:#e8f6ed;color:#18734d;font-size:9px;font-weight:800;letter-spacing:.8px;white-space:nowrap}
+.budget-empty{padding:15px;border-radius:8px;background:#f4f7f5;color:#87948c;font-size:11px}
+.journal-budget-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.journal-budget-card{padding:14px;border:1px solid #e1eae4;border-left:4px solid #269466;border-radius:10px;background:#fff}
+.journal-budget-card.warn{border-left-color:#d69b35}
+.journal-budget-card.over{border-left-color:#c75050}
+.journal-budget-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.journal-budget-card-top b,.journal-budget-card-top span{display:block}
+.journal-budget-card-top b{font-size:12px;color:#244b37}
+.journal-budget-card-top span{margin-top:3px;color:#849087;font-size:10px}
+.budget-state{font-size:9px;font-style:normal;font-weight:800;color:#18734d;background:#eaf7ef;padding:5px 7px;border-radius:20px;white-space:nowrap}
+.budget-state.warn{color:#986516;background:#fff3dc}
+.budget-state.over{color:#a43e3e;background:#fff0ee}
+.journal-budget-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.journal-budget-metrics small,.journal-budget-metrics strong{display:block}
+.journal-budget-metrics small{font-size:9px;color:#8a978f}
+.journal-budget-metrics strong{margin-top:4px;font-size:12px;color:#315743;font-variant-numeric:tabular-nums}
+.journal-budget-metrics .remaining strong{color:#188457}
+.journal-budget-card.over .remaining strong{color:#b34444}
+.budget-progress{height:6px;overflow:hidden;background:#edf2ee;border-radius:10px}
+.budget-progress span{display:block;height:100%;background:#27966b;border-radius:10px}
+.journal-budget-card.warn .budget-progress span{background:#d69b35}
+.journal-budget-card.over .budget-progress span{background:#c75050}
+.budget-usage,.budget-footnote{display:block;margin-top:7px;color:#89958d;font-size:9px}
+.budget-filters{flex-wrap:wrap}
+@media(max-width:1100px){.budget-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.budget-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.budget-month-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:680px){.budget-summary{grid-template-columns:1fr 1fr}.budget-form-grid,.budget-month-grid,.journal-budget-grid{grid-template-columns:1fr}.budget-panel-head,.budget-month-head{align-items:flex-start;flex-direction:column}.budget-filters{width:100%}.budget-filters input{width:100%}}
