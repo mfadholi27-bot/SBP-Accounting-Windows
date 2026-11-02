@@ -748,6 +748,79 @@ ipcMain.handle("archive:read",async(_e,p={})=>{
  const journalLines=data.journals.reduce((n,j)=>n+(Array.isArray(j.lines)?j.lines.length:0),0);
  return {ok:true,verified:Boolean(record&&record.metadata_json&&JSON.parse(record.metadata_json).sha256),metadata:{createdAt:data.createdAt,dateFrom:data.dateFrom,dateTo:data.dateTo,journalCount:data.journals.length,journalLineCount:journalLines,accountCount:(data.accounts||[]).length},data};
 });
+
+ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
+  const legacy = payload.state || {};
+  if (Number(payload.version) !== 19 || !Array.isArray(legacy.accounts) || !Array.isArray(legacy.journals)) {
+    throw new Error("File bukan backup SBP Accounting V19 yang dikenali.");
+  }
+  const accounts = legacy.accounts.map(a => ({
+    sandi: String(a.code ?? a.sandi ?? "").trim(),
+    name: String(a.name ?? a.account_name ?? "").trim(),
+    type: String(a.type ?? a.account_type ?? ""),
+    normal: String(a.normalBalance ?? a.normal_balance ?? "DEBIT").toUpperCase() === "KREDIT" ? "KREDIT" : "DEBIT"
+  })).filter(a => a.sandi && a.name);
+  const accountCodes = new Set([...rows("SELECT sandi FROM accounts").map(x => String(x.sandi)), ...accounts.map(x => x.sandi)]);
+  const journals = legacy.journals.map(j => ({
+    date: String(j.date ?? j.journal_date ?? "").slice(0,10),
+    voucher: String(j.number ?? j.voucher_number ?? "").trim(),
+    description: String(j.description ?? "").trim(),
+    status: ["posted","POSTED"].includes(j.status) ? "POSTED" : "DRAFT",
+    lines: Array.isArray(j.lines) ? j.lines : []
+  })).filter(j => j.voucher);
+  const invalid = [];
+  journals.forEach((j, i) => {
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(j.date)) invalid.push("Jurnal "+j.voucher+": tanggal tidak valid.");
+    if (!j.description) invalid.push("Jurnal "+j.voucher+": keterangan kosong.");
+    if (j.lines.length < 2) invalid.push("Jurnal "+j.voucher+": kurang dari dua baris.");
+    j.lines.forEach((line, n) => {
+      const code = String(line.code ?? line.sandi ?? "").trim();
+      const debit = Number(line.debit || 0), credit = Number(line.credit || 0);
+      if (!accountCodes.has(code)) invalid.push("Jurnal "+j.voucher+" baris "+(n+1)+": SANDI "+code+" tidak ada di Master Akun.");
+      if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0 || (debit > 0 && credit > 0)) invalid.push("Jurnal "+j.voucher+" baris "+(n+1)+": nominal tidak valid.");
+    });
+    if (j.status === "POSTED") {
+      const d=j.lines.reduce((n,x)=>n+Number(x.debit||0),0), cr=j.lines.reduce((n,x)=>n+Number(x.credit||0),0);
+      if (Math.abs(d-cr) > 0.005) invalid.push("Jurnal "+j.voucher+": jurnal POSTED tidak seimbang.");
+    }
+  });
+  const opening = Array.isArray(legacy.openingBalances) ? legacy.openingBalances : [];
+  opening.forEach((x,i) => {
+    const period=String(x.period ?? x.period_key ?? ""), code=String(x.accountCode ?? x.sandi ?? "").trim();
+    if (!/^\\d{4}-\\d{2}$/.test(period)) invalid.push("Saldo awal baris "+(i+1)+": periode tidak valid.");
+    if (!accountCodes.has(code)) invalid.push("Saldo awal baris "+(i+1)+": SANDI "+code+" tidak ditemukan.");
+  });
+  if (invalid.length) throw new Error("Migrasi dibatalkan karena ada "+invalid.length+" masalah. Contoh: "+invalid.slice(0,8).join(" | "));
+  let accountInserted=0,journalInserted=0,journalSkipped=0,openingInserted=0,nptransInserted=0;
+  db.run("BEGIN IMMEDIATE");
+  try {
+    for (const a of accounts) {
+      if (!rows("SELECT id FROM accounts WHERE sandi=?", [a.sandi]).length) {
+        db.run("INSERT INTO accounts(sandi,account_name,account_type,normal_balance,is_active,created_at) VALUES(?,?,?,?,1,CURRENT_TIMESTAMP)", [a.sandi,a.name,a.type,a.normal]); accountInserted++;
+      }
+    }
+    for (const j of journals) {
+      if (rows("SELECT id FROM journal_headers WHERE voucher_number=?", [j.voucher]).length) { journalSkipped++; continue; }
+      const period=j.date.slice(0,7), closed=rows("SELECT status FROM accounting_periods WHERE period_key=?", [period]);
+      if (closed.length && closed[0].status === "CLOSED") throw new Error("Periode "+period+" tertutup; migrasi jurnal dihentikan.");
+      db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,source_type,created_at,posted_at) VALUES(?,?,?,?, 'V19_MIGRATION',CURRENT_TIMESTAMP,CASE WHEN ?='POSTED' THEN CURRENT_TIMESTAMP ELSE NULL END)", [j.date,j.voucher,j.description,j.status,j.status]);
+      const jid=db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+      const st=db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+      try { j.lines.forEach((line,i) => { const code=String(line.code ?? line.sandi ?? "").trim(), acc=rows("SELECT id FROM accounts WHERE sandi=?", [code])[0]; st.run([jid,i+1,acc.id,code,String(line.note ?? line.description ?? ""),Number(line.debit||0),Number(line.credit||0)]); }); } finally { st.free(); }
+      journalInserted++;
+    }
+    const os=db.prepare("INSERT OR IGNORE INTO opening_balances(period_key,account_id,sandi,program_code,debit,credit,source_type,source_reference) VALUES(?,?,?,?,?,?,?,?)");
+    try { for (const x of opening) { const code=String(x.accountCode ?? x.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?", [code])[0]; os.run([String(x.period ?? x.period_key),acc.id,code,String(x.program ?? x.program_code ?? ""),Number(x.debit||0),Number(x.credit||0),"V19_MIGRATION","Backup V19"]); if(db.getRowsModified()) openingInserted++; } } finally { os.free(); }
+    const np=Array.isArray(legacy.nptrans)?legacy.nptrans:[];
+    const ns=db.prepare("INSERT INTO nptrans_rows(sandi,transaction_date,voucher_number,row_number,description,amount,raw_json) VALUES(?,?,?,?,?,?,?)");
+    try { for(const x of np) { const date=String(x.tanggal ?? x.transaction_date ?? ""); const iso=/^\\d{4}-\\d{2}-\\d{2}$/.test(date)?date:(/^\\d{8}$/.test(date)?date.slice(0,4)+"-"+date.slice(4,6)+"-"+date.slice(6,8):""); if(!iso) continue; ns.run([String(x.sandi||""),iso,String(x.nobukti ?? x.voucher_number ?? ""),String(x.nourut ?? x.row_number ?? ""),String(x.ket ?? x.description ?? ""),Number(x.jumlah ?? x.amount ?? 0),JSON.stringify(x)]); nptransInserted++; } } finally { ns.free(); }
+    db.run("INSERT INTO audit_logs(action,entity_type,summary) VALUES('MIGRATE_V19','MIGRATION',?)", ["Migrasi V19: "+accountInserted+" akun, "+journalInserted+" jurnal, "+openingInserted+" saldo awal, "+nptransInserted+" NPTRANS; "+journalSkipped+" jurnal dilewati karena nomor bukti sudah ada."]);
+    db.run("COMMIT");
+  } catch(error) { db.run("ROLLBACK"); throw error; }
+  saveDb();
+  return {ok:true,accountInserted,journalInserted,journalSkipped,openingInserted,nptransInserted};
+});
+
 ipcMain.handle("db:restore",async()=>{
  const choice=await dialog.showOpenDialog({title:"Pilih Backup Database untuk Dipulihkan",properties:["openFile"],filters:[{name:"SQLite Database",extensions:["db"]}]});
  if(choice.canceled||!choice.filePaths[0])return {canceled:true};
