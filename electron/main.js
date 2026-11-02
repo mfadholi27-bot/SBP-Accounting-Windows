@@ -811,6 +811,18 @@ ipcMain.handle("migration:import-v19", (_event, payload = {}) => {
     }
     const os=db.prepare("INSERT OR IGNORE INTO opening_balances(period_key,account_id,sandi,program_code,debit,credit,source_type,source_reference) VALUES(?,?,?,?,?,?,?,?)");
     try { for (const x of opening) { const code=String(x.accountCode ?? x.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?", [code])[0]; os.run([String(x.period ?? x.period_key),acc.id,code,String(x.program ?? x.program_code ?? ""),Number(x.debit||0),Number(x.credit||0),"V19_MIGRATION","Backup V19"]); if(db.getRowsModified()) openingInserted++; } } finally { os.free(); }
+    const notes=Array.isArray(legacy.debitNotes)?legacy.debitNotes:[];
+    for(const n of notes){
+      const number=String(n.number||"").trim(),date=String(n.date||"").slice(0,10),partner=String(n.partner||"").trim(),description=String(n.description||"").trim();
+      if(!number||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!partner||!description||rows("SELECT id FROM debit_notes WHERE note_number=?",[number]).length) continue;
+      const status=n.status==="posted"?"POSTED":n.status==="cancelled"?"CANCELLED":"DRAFT";
+      const linked=rows("SELECT id FROM journal_headers WHERE voucher_number=?",[number])[0];
+      db.run("INSERT INTO debit_notes(note_number,note_date,note_type,partner_name,invoice_reference,description,status,linked_journal_id,posted_at,cancelled_at,cancel_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        [number,date,String(n.kind||""),partner,String(n.reference||""),description,status,linked?linked.id:null,n.postedAt||null,n.cancelledAt||null,n.cancelReason||null]);
+      const noteId=db.exec("SELECT last_insert_rowid()")[0].values[0][0], lines=Array.isArray(n.lines)?n.lines:[];
+      const ds=db.prepare("INSERT INTO debit_note_lines(debit_note_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+      try{lines.forEach((line,index)=>{const code=String(line.code||"").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[code])[0];if(acc)ds.run([noteId,index+1,acc.id,code,String(line.note||""),Number(line.debit||0),Number(line.credit||0)]);});}finally{ds.free();}
+    }
     const budgets=Array.isArray(legacy.annualBudgets)?legacy.annualBudgets:[];
     const bs=db.prepare("INSERT OR IGNORE INTO annual_budgets(fiscal_year,account_id,sandi,month_no,budget_amount,program_code,notes) VALUES(?,?,?,?,?,?,?)");
     try { for(const b of budgets){ const year=Number(b.year ?? b.fiscal_year),code=String(b.accountCode ?? b.sandi ?? "").trim(),acc=rows("SELECT id FROM accounts WHERE sandi=?",[code])[0],monthly=Array.isArray(b.monthly)?b.monthly:(Array.isArray(b.months)?b.months:[]); if(!acc||!Number.isInteger(year)||monthly.length!==12) continue; monthly.forEach((amount,index)=>{const value=Number(amount||0);if(Number.isFinite(value)&&value>=0)bs.run([year,acc.id,code,index+1,value,String(b.programCode||""),String(b.notes||"")]);}); } } finally { bs.free(); }
