@@ -660,6 +660,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     const s=Object.fromEntries((await window.sbpDesktop.getPrintSettings()).map(x=>[x.setting_key,x.setting_value]));
     $("print-paper").value=s.paper||"F4";$("print-orientation").value=s.orientation||"Auto";$("print-company").value=s.company||"";$("print-header").value=s.header||"";
     $("print-signature").checked=s.signature!=="false";$("print-summary").checked=s.summary!=="false";$("print-page-number").checked=s.page_number!=="false";
+    let printStyle=document.getElementById("sbp-print-page-style");
+    if(!printStyle){printStyle=document.createElement("style");printStyle.id="sbp-print-page-style";document.head.appendChild(printStyle);}
+    const orientation=String(s.orientation||"Auto").toLowerCase();
+    const pageSize=(s.paper||"F4")+" "+(orientation==="auto"?"portrait":orientation);
+    printStyle.textContent="@page { size: "+pageSize+"; margin: 12mm; } body::before { content: "+JSON.stringify([s.company,s.header].filter(Boolean).join(" · "))+"; display:block; font-weight:700; text-align:center; margin-bottom:10px; }";
   }
   $("print-save").addEventListener("click",async()=>{
     try{await window.sbpDesktop.savePrintSettings({paper:$("print-paper").value,orientation:$("print-orientation").value,company:$("print-company").value,header:$("print-header").value,signature:String($("print-signature").checked),summary:String($("print-summary").checked),page_number:String($("print-page-number").checked)});
