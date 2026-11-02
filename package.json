@@ -30,7 +30,8 @@
       "src/**/*",
       "assets/**/*",
       "node_modules/sql.js/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/xlsx/**/*"
     ],
     "extraResources": [
       {
