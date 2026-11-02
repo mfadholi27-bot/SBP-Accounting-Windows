@@ -811,6 +811,52 @@ $("ledger-export").addEventListener("click",()=>{const rows=Array.from($("ledger
     $("nptrans-saved-summary").textContent=rows.length+" baris ditampilkan (maksimum 1.000).";
     $("nptrans-saved-rows").innerHTML=rows.length?rows.map(x=>'<tr><td>'+escapeHtml(x.sandi)+'</td><td>'+escapeHtml(x.transaction_date)+'</td><td>'+escapeHtml(x.voucher_number)+'</td><td>'+escapeHtml(x.row_number)+'</td><td>'+escapeHtml(x.description)+'</td><td class="money-cell">'+money(x.amount)+'</td></tr>').join(""):'<tr><td colspan="6" class="empty">Belum ada data NPTRANS.</td></tr>';
   }
+
+  let pendingV19Migration=null;
+  $("v19-backup-file").addEventListener("change",e=>{
+    const file=e.target.files[0]||null;
+    $("v19-backup-name").textContent=file?file.name:"Belum ada file dipilih.";
+    $("v19-backup-preview").disabled=!file;
+    $("v19-backup-review").hidden=true;
+    pendingV19Migration=null;
+  });
+  $("v19-backup-preview").addEventListener("click",async()=>{
+    const file=$("v19-backup-file").files[0];if(!file)return;
+    try{
+      const payload=JSON.parse(await file.text());
+      if(Number(payload.version)!==19||!payload.state||!Array.isArray(payload.state.accounts)||!Array.isArray(payload.state.journals))throw new Error("File bukan backup JSON SBP Accounting V19 yang dikenali.");
+      const state=payload.state;
+      pendingV19Migration={version:19,state,file_name:file.name};
+      $("v19-backup-summary").textContent="Backup V19 terbaca: "+state.accounts.length+" akun · "+state.journals.length+" jurnal · "+(state.openingBalances||[]).length+" saldo awal · "+(state.nptrans||[]).length+" baris NPTRANS";
+      $("v19-backup-detail").textContent="Data akan digabungkan ke V20. Data V20 yang sudah ada tidak dihapus. Jurnal dengan nomor bukti yang sudah digunakan akan dilewati. Pastikan backup asli tetap disimpan di lokasi terpisah.";
+      $("v19-backup-review").hidden=false;
+      $("v19-backup-confirm").disabled=false;
+      $("v19-backup-message").textContent="Struktur backup berhasil dibaca. Periksa ringkasan sebelum menjalankan migrasi.";
+      $("v19-backup-message").className="import-message success";
+    }catch(error){
+      pendingV19Migration=null;$("v19-backup-review").hidden=true;
+      $("v19-backup-message").textContent="Pemeriksaan gagal: "+error.message;
+      $("v19-backup-message").className="import-message error";
+    }
+  });
+  $("v19-backup-cancel").addEventListener("click",()=>{pendingV19Migration=null;$("v19-backup-review").hidden=true;});
+  $("v19-backup-confirm").addEventListener("click",async()=>{
+    if(!pendingV19Migration)return;
+    if(!confirm("Migrasi akan menambahkan data V19 ke database V20. Data yang sudah ada tidak dihapus. Lanjutkan?"))return;
+    $("v19-backup-confirm").disabled=true;
+    try{
+      const result=await window.sbpDesktop.importV19Backup(pendingV19Migration);
+      $("v19-backup-message").textContent="Migrasi selesai: "+result.accountInserted+" akun baru, "+result.journalInserted+" jurnal masuk, "+result.journalSkipped+" jurnal dilewati, "+result.openingInserted+" saldo awal, "+result.nptransInserted+" baris NPTRANS.";
+      $("v19-backup-message").className="import-message success";
+      pendingV19Migration=null;$("v19-backup-review").hidden=true;
+      await refreshSummary();await loadAccounts();await loadOpeningBalances();await refreshNptransRows();await loadJournalList();
+    }catch(error){
+      $("v19-backup-message").textContent="Migrasi dibatalkan: "+error.message;
+      $("v19-backup-message").className="import-message error";
+      $("v19-backup-confirm").disabled=false;
+    }
+  });
+
   let selectedNpFile=null,selectedAccountFile=null,selectedOpeningFile=null;
   $("nptrans-file").addEventListener("change",e=>{selectedNpFile=e.target.files[0]||null;$("nptrans-file-name").textContent=selectedNpFile?selectedNpFile.name:"Belum ada file dipilih.";$("nptrans-preview").disabled=!selectedNpFile;$("nptrans-review").hidden=true;pendingNptransBatch=null;});
   $("nptrans-preview").addEventListener("click",async()=>{
