@@ -32,6 +32,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (name === "journal") prepareJournal();
     if (name === "journal-list") loadJournalList();
     if (name === "annual-budget") loadAnnualBudgets();
+    if (name === "opening-balances") loadOpeningBalances();
+    if (name === "import-center") refreshNptransRows();
   }
 
   navButtons.forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
@@ -621,7 +623,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   async function readImportRows(file){
     const ext=file.name.toLowerCase().split(".").pop();
-    if(ext==="dbf")return importDbf(await file.arrayBuffer());
+    if(ext==="dbf"){const parsed=importDbf(await file.arrayBuffer());return {rows:[parsed.fields,...parsed.records.map(record=>parsed.fields.map(field=>record[field]))],deletedCount:parsed.deletedCount};}
     if(ext==="csv"||ext==="txt")return {rows:parseImportCsv(await file.text())};
     if(ext==="xls"||ext==="xlsx"){
       if(!window.XLSX)throw new Error("Mesin Excel lokal belum tersedia. Jalankan npm install lalu buka ulang aplikasi.");
