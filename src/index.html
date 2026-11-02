@@ -70,6 +70,10 @@
       </div>
       <div class="journal-lines-heading"><div><h3>Rincian Jurnal</h3><p>Setiap baris menggunakan satu sisi: Debit atau Kredit.</p></div><button type="button" class="secondary" id="add-journal-line">+ Tambah Baris</button></div>
       <div class="table-wrap"><table class="data-table journal-entry-table"><thead><tr><th style="width:150px">SANDI AKUN</th><th>NAMA AKUN</th><th>KETERANGAN BARIS</th><th style="width:160px">DEBIT (Rp)</th><th style="width:160px">KREDIT (Rp)</th><th style="width:54px"></th></tr></thead><tbody id="journal-entry-rows"></tbody></table></div>
+      <section class="journal-budget-panel">
+        <div class="journal-budget-heading"><div><h3>Kontrol Anggaran Bulan Ini</h3><p>Anggaran dan realisasi mengikuti tanggal serta SANDI akun yang dipilih.</p></div><span class="budget-live-pill">LIVE PREVIEW</span></div>
+        <div id="journal-budget-content"><div class="budget-empty">Pilih SANDI akun yang memiliki anggaran.</div></div>
+      </section>
       <div class="journal-total-grid"><div><small>TOTAL DEBIT</small><b id="journal-total-debit">Rp 0</b></div><div><small>TOTAL KREDIT</small><b id="journal-total-credit">Rp 0</b></div><div><small>SELISIH</small><b id="journal-total-diff">Rp 0</b></div></div>
       <div id="journal-message" class="journal-message" role="status">Isi tanggal, nomor bukti, keterangan, dan minimal dua baris akun.</div>
       <div class="journal-actions"><button type="button" class="secondary" id="reset-journal">Kosongkan Form</button><button type="button" class="secondary" id="save-journal-draft">Simpan Draft</button><button type="button" class="primary" id="post-journal">Posting Jurnal</button></div>
@@ -83,7 +87,32 @@
   </section>
   <section class="view" id="view-debit-notes"><div class="placeholder panel"><span>▤</span><h2>Nota Debet</h2><p>Pengelolaan nota debet dan keterkaitannya dengan jurnal.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
   <section class="view" id="view-opening-balances"><div class="placeholder panel"><span>▣</span><h2>Saldo Awal ACC & Program</h2><p>Saldo awal per SANDI akun, termasuk pratinjau impor dan pemeriksaan keseimbangan.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
-  <section class="view" id="view-annual-budget"><div class="placeholder panel"><span>◷</span><h2>Anggaran Tahunan</h2><p>Anggaran per akun dan bulan, realisasi, serta sisa anggaran.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
+  <section class="view" id="view-annual-budget">
+    <div class="budget-hero panel"><div><span class="module-state">PENGENDALIAN ANGGARAN</span><h2>Anggaran Tahunan</h2><p>Susun pagu per SANDI akun, distribusikan ke 12 bulan, dan pantau realisasi dari jurnal POSTED.</p></div></div>
+    <div class="budget-summary" id="budget-summary">
+      <article><span>Total Anggaran</span><b id="budget-total-annual">Rp 0</b><small>Anggaran tahun terpilih</small></article>
+      <article><span>Total Realisasi</span><b id="budget-total-actual">Rp 0</b><small>Jurnal POSTED</small></article>
+      <article><span>Sisa Anggaran</span><b id="budget-total-remaining">Rp 0</b><small>Anggaran dikurangi realisasi</small></article>
+      <article><span>Penggunaan</span><b id="budget-total-percent">0%</b><small>Persentase realisasi</small></article>
+    </div>
+    <div class="panel budget-editor">
+      <div class="budget-panel-head"><div><h3 id="budget-form-title">Buat Anggaran Akun</h3><p>Master Akun adalah sumber SANDI. Total 12 bulan harus sama dengan anggaran tahunan.</p></div><span class="module-state">PER SANDI AKUN</span></div>
+      <div class="budget-form-grid">
+        <label>Tahun Anggaran<input id="budget-year" type="number" min="2000" max="2100"></label>
+        <label>SANDI Akun<select id="budget-account"></select></label>
+        <label>Nama Akun<input id="budget-account-name" readonly placeholder="Terisi otomatis"></label>
+        <label>Total Anggaran Tahunan<input id="budget-annual" type="number" min="0" step="1" placeholder="Nominal anggaran"></label>
+      </div>
+      <div class="budget-month-head"><div><h3>Distribusi Anggaran Bulanan</h3><p>Isi manual atau gunakan pembagian rata.</p></div><button type="button" class="secondary" id="budget-distribute">Bagi Rata 12 Bulan</button></div>
+      <div class="budget-month-grid" id="budget-month-grid"></div>
+      <div class="budget-validation" id="budget-validation">Isi anggaran tahunan dan distribusi bulanan.</div>
+      <div class="journal-actions"><button type="button" class="secondary" id="budget-reset">Kosongkan</button><button type="button" class="primary" id="budget-save">Simpan Anggaran</button></div>
+    </div>
+    <div class="panel">
+      <div class="budget-panel-head"><div><h3>Daftar Anggaran & Realisasi</h3><p>Realisasi dihitung dari transaksi POSTED per SANDI.</p></div><div class="budget-filters"><label>Tahun Laporan<select id="budget-filter-year"></select></label><input id="budget-search" placeholder="Cari SANDI atau nama akun"></div></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>SANDI</th><th>NAMA AKUN</th><th>ANGGARAN</th><th>REALISASI</th><th>SISA</th><th>PENGGUNAAN</th><th>AKSI</th></tr></thead><tbody id="budget-rows"><tr><td colspan="7" class="empty">Belum ada data anggaran.</td></tr></tbody></table></div>
+    </div>
+  </section>
   <section class="view" id="view-periods"><div class="placeholder panel"><span>▦</span><h2>Periode Akuntansi</h2><p>Pengaturan periode, pembukaan dan penutupan periode, serta penguncian transaksi.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
   <section class="view" id="view-ledger"><div class="placeholder panel"><span>▥</span><h2>Buku Besar</h2><p>Laporan mutasi per akun yang mengambil transaksi berstatus POSTED.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
   <section class="view" id="view-reports"><div class="placeholder panel"><span>▧</span><h2>Laporan Keuangan</h2><p>Pusat laporan akuntansi dan rekapitulasi periode.</p><label class="module-state">KERANGKA HALAMAN</label></div></section>
