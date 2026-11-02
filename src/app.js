@@ -561,5 +561,214 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+
+  // Legacy Import Center: local XLSX/CSV/DBF parsing with explicit preview and approval.
+  let pendingNptransBatch=null,pendingAccountBatch=null,pendingOpeningBatch=null;
+  const importNorm=value=>String(value??"").trim().toUpperCase().replace(/[\\s_./-]+/g,"").replace(/[^A-Z0-9]/g,"");
+  const importAmount=value=>{
+    if(value===null||value===undefined||value==="")return 0;
+    if(typeof value==="number")return Number.isFinite(value)?value:NaN;
+    let s=String(value).trim().replace(/[\\s\\u00a0]/g,"").replace(/^Rp/i,"").replace(/[^0-9,.-]/g,"");
+    if(s.includes(",")&&s.includes("."))s=s.lastIndexOf(",")>s.lastIndexOf(".")?s.replace(/\\./g,"").replace(",","."):s.replace(/,/g,"");
+    else if(s.includes(",")){const a=s.split(",");s=a.length===2&&a[1].length<=2?s.replace(",","."):s.replace(/,/g,"");}
+    const n=Number(s);return Number.isFinite(n)?n:NaN;
+  };
+  function parseImportCsv(text){
+    const rows=[];let row=[],cell="",quoted=false;
+    const s=String(text||"").replace(/^\\uFEFF/,"");
+    for(let i=0;i<s.length;i++){
+      const ch=s[i],next=s[i+1];
+      if(ch==='"'&&quoted&&next==='"'){cell+='"';i++;}
+      else if(ch==='"'){quoted=!quoted;}
+      else if((ch===","||ch===";"||ch==="\\t")&&!quoted){row.push(cell);cell="";}
+      else if((ch==="\\n"||ch==="\\r")&&!quoted){if(ch==="\\r"&&next==="\\n")i++;row.push(cell);if(row.some(x=>String(x).trim()))rows.push(row);row=[];cell="";}
+      else cell+=ch;
+    }
+    row.push(cell);if(row.some(x=>String(x).trim()))rows.push(row);
+    if(!rows.length)throw new Error("File kosong.");
+    const commaCount=(rows[0].join("").match(/,/g)||[]).length,semiCount=(rows[0].join("").match(/;/g)||[]).length;
+    return rows;
+  }
+  function importDbf(buffer){
+    const b=new Uint8Array(buffer),v=new DataView(buffer);
+    if(b.length<33)throw new Error("File terlalu kecil untuk DBF.");
+    const count=v.getUint32(4,true),headerLen=v.getUint16(8,true),recordLen=v.getUint16(10,true);
+    if(headerLen<33||recordLen<2||headerLen>b.length)throw new Error("Header DBF tidak valid.");
+    const fields=[];let fieldBytes=0;
+    for(let p=32;p<headerLen-1&&b[p]!==0x0d;p+=32){
+      let end=p;while(end<p+11&&b[end])end++;
+      const name=new TextDecoder("ascii").decode(b.slice(p,end));
+      const f={name,type:String.fromCharCode(b[p+11]),length:b[p+16],decimals:b[p+17]};
+      if(!name||!f.length)throw new Error("Struktur field DBF tidak lengkap.");
+      fields.push(f);fieldBytes+=f.length;
+    }
+    if(!fields.length||fieldBytes+1>recordLen)throw new Error("Panjang field DBF tidak cocok dengan record.");
+    if(count>Math.floor((b.length-headerLen)/recordLen))throw new Error("Jumlah record DBF tidak cocok dengan ukuran file.");
+    const records=[],decoder=new TextDecoder("windows-1252");
+    for(let i=0,p=headerLen;i<count;i++,p+=recordLen){
+      if(b[p]===0x2a)continue;
+      let q=p+1,obj={};
+      for(const f of fields){
+        const raw=decoder.decode(b.slice(q,q+f.length)).replace(/\\u0000/g,"").trim();q+=f.length;
+        let val=raw;
+        if(f.type==="N"||f.type==="F")val=raw===""?0:importAmount(raw);
+        else if(f.type==="D"&&/^\\d{8}$/.test(raw))val=raw.slice(0,4)+"-"+raw.slice(4,6)+"-"+raw.slice(6,8);
+        obj[f.name]=val;
+      }
+      records.push(obj);
+    }
+    return {records,fields:fields.map(x=>x.name),recordCount:count,deletedCount:count-records.length};
+  }
+  async function readImportRows(file){
+    const ext=file.name.toLowerCase().split(".").pop();
+    if(ext==="dbf")return importDbf(await file.arrayBuffer());
+    if(ext==="csv"||ext==="txt")return {rows:parseImportCsv(await file.text())};
+    if(ext==="xls"||ext==="xlsx"){
+      if(!window.XLSX)throw new Error("Mesin Excel lokal belum tersedia. Jalankan npm install lalu buka ulang aplikasi.");
+      const wb=window.XLSX.read(await file.arrayBuffer(),{type:"array",cellDates:false});
+      const sheet=wb.SheetNames[0];if(!sheet)throw new Error("Workbook tidak memiliki sheet.");
+      return {rows:window.XLSX.utils.sheet_to_json(wb.Sheets[sheet],{header:1,defval:"",raw:false})};
+    }
+    throw new Error("Format file tidak didukung.");
+  }
+  function findImportHeader(rows,required,aliases={}){
+    for(let i=0;i<Math.min(rows.length,40);i++){
+      const headers=rows[i].map(importNorm),map={};
+      for(const key of required){
+        const opts=[key,...(aliases[key]||[])].map(importNorm);
+        map[key]=headers.findIndex(h=>opts.includes(h));
+      }
+      if(required.every(k=>map[k]>=0))return {index:i,map};
+    }
+    throw new Error("Header wajib tidak ditemukan: "+required.join(", "));
+  }
+  function importDate(value){
+    let s=String(value??"").trim();
+    if(/^\\d{8}$/.test(s))return s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8);
+    if(/^\\d{4}-\\d{2}-\\d{2}$/.test(s))return s;
+    let m=s.match(/^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$/);
+    if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+    return s;
+  }
+  function showImportTab(tab){
+    document.querySelectorAll("[data-import-tab]").forEach(b=>b.classList.toggle("active",b.dataset.importTab===tab));
+    ["nptrans","accounts","opening"].forEach(name=>{const el=$("import-panel-"+name);if(el)el.hidden=name!==tab;});
+  }
+  document.querySelectorAll("[data-import-tab]").forEach(b=>b.addEventListener("click",()=>showImportTab(b.dataset.importTab)));
+  async function refreshNptransRows(){
+    const rows=await window.sbpDesktop.listNptrans({keyword:$("nptrans-search").value});
+    $("nptrans-saved-summary").textContent=rows.length+" baris ditampilkan (maksimum 1.000).";
+    $("nptrans-saved-rows").innerHTML=rows.length?rows.map(x=>'<tr><td>'+escapeHtml(x.sandi)+'</td><td>'+escapeHtml(x.transaction_date)+'</td><td>'+escapeHtml(x.voucher_number)+'</td><td>'+escapeHtml(x.row_number)+'</td><td>'+escapeHtml(x.description)+'</td><td class="money-cell">'+money(x.amount)+'</td></tr>').join(""):'<tr><td colspan="6" class="empty">Belum ada data NPTRANS.</td></tr>';
+  }
+  let selectedNpFile=null,selectedAccountFile=null,selectedOpeningFile=null;
+  $("nptrans-file").addEventListener("change",e=>{selectedNpFile=e.target.files[0]||null;$("nptrans-file-name").textContent=selectedNpFile?selectedNpFile.name:"Belum ada file dipilih.";$("nptrans-preview").disabled=!selectedNpFile;$("nptrans-review").hidden=true;pendingNptransBatch=null;});
+  $("nptrans-preview").addEventListener("click",async()=>{
+    const file=selectedNpFile;if(!file)return;
+    try{
+      const parsed=await readImportRows(file);let raw=parsed.records||parsed.rows;
+      const header=findImportHeader(raw,["SANDI","TANGGAL","NOBUKTI","NOURUT","KET","JUMLAH"],{TANGGAL:["DATE"],NOBUKTI:["NOMORBUKTI","BUKTI"],NOURUT:["URUT","NO"],KET:["KETERANGAN","URAIAN"],JUMLAH:["NILAI","AMOUNT"]});
+      const items=raw.slice(header.index+1).map((r,i)=>({sandi:String(r[header.map.SANDI]??"").trim(),transaction_date:importDate(r[header.map.TANGGAL]),voucher_number:String(r[header.map.NOBUKTI]??"").trim(),row_number:String(r[header.map.NOURUT]??"").trim(),description:String(r[header.map.KET]??"").trim(),amount:importAmount(r[header.map.JUMLAH]),source_row_no:header.index+i+2,raw:r}))
+        .filter(x=>x.sandi||x.voucher_number||x.description||x.amount);
+      const valid=items.filter(x=>x.sandi&&x.voucher_number&&/^\\d{4}-\\d{2}-\\d{2}$/.test(x.transaction_date)&&Number.isFinite(x.amount));
+      const invalid=items.length-valid.length;
+      const mode=$("nptrans-mode").value;
+      const current=await window.sbpDesktop.listNptrans({});
+      const key=x=>[x.sandi,x.transaction_date,x.voucher_number,x.row_number,x.description,Number(x.amount).toFixed(2)].join("|").toUpperCase();
+      const existing=new Set(current.map(key)),seen=new Set();let duplicates=0;
+      valid.forEach(x=>{if(existing.has(key(x))||seen.has(key(x)))duplicates++;seen.add(key(x));});
+      pendingNptransBatch={file_name:file.name,file_type:file.name.split(".").pop().toUpperCase(),items:valid,total_read:items.length,deleted_count:parsed.deletedCount||0,mode,invalid,duplicates};
+      $("nptrans-review-summary").textContent=items.length+" record dibaca · "+valid.length+" valid · "+invalid+" ditolak";
+      $("nptrans-review-detail").textContent="Duplikat terdeteksi: "+duplicates+". Mode: "+mode+". Data belum disimpan.";
+      $("nptrans-preview-rows").innerHTML=valid.slice(0,100).map(x=>'<tr><td>'+x.source_row_no+'</td><td>'+escapeHtml(x.sandi)+'</td><td>'+escapeHtml(x.transaction_date)+'</td><td>'+escapeHtml(x.voucher_number)+'</td><td>'+escapeHtml(x.row_number)+'</td><td>'+escapeHtml(x.description)+'</td><td>'+money(x.amount)+'</td></tr>').join("");
+      $("nptrans-review").hidden=false;$("nptrans-confirm").disabled=!valid.length||invalid>0;
+      $("nptrans-message").textContent=invalid?"Ada baris tidak valid. Perbaiki file sumber sebelum menyimpan.":"Pratinjau berhasil. Periksa sampel data sebelum menyimpan.";
+      $("nptrans-message").className="import-message "+(invalid?"error":"success");
+    }catch(error){pendingNptransBatch=null;$("nptrans-review").hidden=true;$("nptrans-message").textContent="Gagal membaca file: "+error.message;$("nptrans-message").className="import-message error";}
+  });
+  $("nptrans-cancel").addEventListener("click",()=>{pendingNptransBatch=null;$("nptrans-review").hidden=true;});
+  $("nptrans-confirm").addEventListener("click",async()=>{
+    const batch=pendingNptransBatch;if(!batch)return;
+    if(batch.mode==="replace"&&!confirm("PERINGATAN: seluruh data NPTRANS lama akan diganti. Lanjutkan hanya setelah backup."))return;
+    try{const result=await window.sbpDesktop.importNptrans({...batch,items:batch.items});$("nptrans-message").textContent="Import selesai: "+result.inserted+" baris masuk, "+result.skipped+" duplikat dilewati.";$("nptrans-message").className="import-message success";pendingNptransBatch=null;$("nptrans-review").hidden=true;await refreshNptransRows();}
+    catch(error){$("nptrans-message").textContent="Import gagal: "+error.message;$("nptrans-message").className="import-message error";}
+  });
+  $("nptrans-search").addEventListener("input",refreshNptransRows);
+
+  $("account-import-file").addEventListener("change",e=>{selectedAccountFile=e.target.files[0]||null;$("account-import-file-name").textContent=selectedAccountFile?selectedAccountFile.name:"Belum ada file dipilih.";$("account-import-preview").disabled=!selectedAccountFile;$("account-import-review").hidden=true;pendingAccountBatch=null;});
+  $("account-import-preview").addEventListener("click",async()=>{
+    try{
+      const parsed=await readImportRows(selectedAccountFile),raw=parsed.records||parsed.rows;
+      const header=findImportHeader(raw,["SANDI"],{SANDI:["KODE","KODEAKUN","ACCOUNTCODE"]});
+      const h=raw[header.index].map(importNorm),nameIndex=h.findIndex(x=>["NAMA","NAMAAKUN","DES","KETERANGAN","URAIAN","ACCOUNTNAME"].includes(x));
+      const items=raw.slice(header.index+1).map(r=>({sandi:String(r[header.map.SANDI]??"").trim(),account_name:nameIndex>=0?String(r[nameIndex]??"").trim():""})).filter(x=>x.sandi);
+      if(!items.length)throw new Error("Tidak ada baris SANDI di bawah header.");
+      const bad=items.filter(x=>!x.account_name);
+      pendingAccountBatch={items,file_name:selectedAccountFile.name,bad:bad.length};
+      const current=await window.sbpDesktop.listAccounts("");
+      $("account-import-summary").textContent=items.length+" akun terbaca · "+items.filter(x=>current.some(a=>a.sandi===x.sandi)).length+" akan diperbarui · "+items.filter(x=>!current.some(a=>a.sandi===x.sandi)).length+" akun baru";
+      $("account-import-detail").textContent=bad.length+" baris tanpa nama akun. Semua baris harus memiliki SANDI dan nama akun.";
+      $("account-import-preview-rows").innerHTML=items.slice(0,150).map(x=>'<tr><td>'+escapeHtml(x.sandi)+'</td><td>'+escapeHtml(x.account_name)+'</td><td>'+ (current.some(a=>a.sandi===x.sandi)?"Perbarui nama":"Tambah akun")+'</td></tr>').join("");
+      $("account-import-review").hidden=false;$("account-import-confirm").disabled=bad.length>0;
+      $("account-import-message").textContent=bad.length?"Ada baris tanpa nama akun. Perbaiki file sumber.":"Pratinjau Master Akun siap diperiksa.";
+      $("account-import-message").className="import-message "+(bad.length?"error":"success");
+    }catch(error){pendingAccountBatch=null;$("account-import-message").textContent="Gagal membaca file: "+error.message;$("account-import-message").className="import-message error";}
+  });
+  $("account-import-cancel").addEventListener("click",()=>{pendingAccountBatch=null;$("account-import-review").hidden=true;});
+  $("account-import-confirm").addEventListener("click",async()=>{
+    if(!pendingAccountBatch)return;
+    try{const result=await window.sbpDesktop.importAccounts(pendingAccountBatch);$("account-import-message").textContent="Selesai: "+result.inserted+" akun baru, "+result.updated+" diperbarui.";$("account-import-message").className="import-message success";pendingAccountBatch=null;$("account-import-review").hidden=true;await loadAccounts();await prepareJournal();}
+    catch(error){$("account-import-message").textContent="Import gagal: "+error.message;$("account-import-message").className="import-message error";}
+  });
+
+  $("opening-import-file").addEventListener("change",e=>{selectedOpeningFile=e.target.files[0]||null;$("opening-import-file-name").textContent=selectedOpeningFile?selectedOpeningFile.name:"Belum ada file dipilih.";$("opening-import-preview").disabled=!selectedOpeningFile;$("opening-import-review").hidden=true;pendingOpeningBatch=null;});
+  $("opening-import-preview").addEventListener("click",async()=>{
+    try{
+      const parsed=await readImportRows(selectedOpeningFile),raw=parsed.records||parsed.rows;
+      const head=findImportHeader(raw,["PERIODE","SANDI"],{PERIODE:["BULAN","PERIOD"],SANDI:["KODE","KODEAKUN"]});
+      const h=raw[head.index].map(importNorm);
+      const ix=(names)=>h.findIndex(x=>names.map(importNorm).includes(x));
+      const d=ix(["DEBIT","DEBITAWAL","SALDOAWALDEBIT"]),cr=ix(["KREDIT","KREDITAWAL","SALDOAWALKREDIT"]),program=ix(["PROGRAM","KODEPROGRAM"]);
+      if(d<0||cr<0)throw new Error("Kolom DEBIT dan KREDIT (atau DEBIT AWAL dan KREDIT AWAL) wajib tersedia.");
+      const items=raw.slice(head.index+1).map((r,i)=>({period_key:String(r[head.map.PERIODE]??"").trim(),sandi:String(r[head.map.SANDI]??"").trim(),debit:importAmount(r[d]),credit:importAmount(r[cr]),program_code:program>=0?String(r[program]??"").trim():"",row:i+head.index+2})).filter(x=>x.sandi||x.period_key);
+      const accounts=await window.sbpDesktop.listAccounts("");
+      const errors=[];
+      items.forEach(x=>{if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(x.period_key))errors.push("Baris "+x.row+": periode harus YYYY-MM.");if(!accounts.some(a=>a.sandi===x.sandi))errors.push("Baris "+x.row+": SANDI tidak ada di Master Akun.");if(!Number.isFinite(x.debit)||!Number.isFinite(x.credit)||x.debit<0||x.credit<0||(x.debit>0&&x.credit>0)||(!(x.debit>0)&&!(x.credit>0)))errors.push("Baris "+x.row+": isi salah satu debit/kredit dengan nominal positif.");});
+      pendingOpeningBatch={file_name:selectedOpeningFile.name,items,errors};
+      $("opening-import-summary").textContent=items.length+" baris dibaca · "+(items.length-errors.length)+" baris berpotensi valid";
+      $("opening-import-detail").textContent=errors.length?errors.slice(0,12).join(" | "):"Validasi format dan Master Akun berhasil. Duplikat di database akan dilewati.";
+      $("opening-import-preview-rows").innerHTML=items.slice(0,150).map(x=>'<tr><td>'+escapeHtml(x.period_key)+'</td><td>'+escapeHtml(x.sandi)+'</td><td>'+money(x.debit)+'</td><td>'+money(x.credit)+'</td><td>'+ (errors.some(e=>e.includes("Baris "+x.row+":"))?"Periksa":"Siap")+'</td></tr>').join("");
+      $("opening-import-review").hidden=false;$("opening-import-confirm").disabled=errors.length>0||!items.length;
+      $("opening-import-message").textContent=errors.length?"Ada kesalahan yang harus diperbaiki. Tidak ada data disimpan.":"Pratinjau saldo awal siap diimpor.";
+      $("opening-import-message").className="import-message "+(errors.length?"error":"success");
+    }catch(error){pendingOpeningBatch=null;$("opening-import-message").textContent="Gagal membaca file: "+error.message;$("opening-import-message").className="import-message error";}
+  });
+  $("opening-import-cancel").addEventListener("click",()=>{pendingOpeningBatch=null;$("opening-import-review").hidden=true;});
+  $("opening-import-confirm").addEventListener("click",async()=>{
+    if(!pendingOpeningBatch||pendingOpeningBatch.errors.length)return;
+    try{const result=await window.sbpDesktop.importOpeningBalances(pendingOpeningBatch);$("opening-import-message").textContent="Import selesai: "+result.inserted+" saldo awal baru, "+result.skipped+" dilewati.";$("opening-import-message").className="import-message success";pendingOpeningBatch=null;$("opening-import-review").hidden=true;await loadOpeningBalances();}
+    catch(error){$("opening-import-message").textContent="Import gagal: "+error.message;$("opening-import-message").className="import-message error";}
+  });
+
+  async function loadOpeningBalances(){
+    const period=$("opening-period").value;
+    const items=await window.sbpDesktop.listOpeningBalances(period);
+    const accounts=await window.sbpDesktop.listAccounts("");
+    $("opening-account").innerHTML='<option value="">Pilih SANDI</option>'+accounts.filter(a=>Number(a.is_active)===1).map(a=>'<option value="'+escapeHtml(a.sandi)+'">'+escapeHtml(a.sandi+" — "+a.account_name)+'</option>').join("");
+    $("opening-rows").innerHTML=items.length?items.map(x=>'<tr><td>'+escapeHtml(x.period_key)+'</td><td>'+escapeHtml(x.sandi)+'</td><td>'+escapeHtml(x.program_code||"")+'</td><td>'+money(x.debit)+'</td><td>'+money(x.credit)+'</td></tr>').join(""):'<tr><td colspan="5" class="empty">Belum ada saldo awal.</td></tr>';
+    const debit=items.reduce((a,x)=>a+Number(x.debit||0),0),credit=items.reduce((a,x)=>a+Number(x.credit||0),0);
+    $("opening-totals").textContent="Debit "+money(debit)+" · Kredit "+money(credit)+" · Selisih "+money(debit-credit);
+  }
+  $("opening-period").addEventListener("change",loadOpeningBalances);
+  $("opening-save").addEventListener("click",async()=>{
+    try{await window.sbpDesktop.saveOpeningBalance({period_key:$("opening-period").value,sandi:$("opening-account").value,program_code:$("opening-program").value,debit:Number($("opening-debit").value||0),credit:Number($("opening-credit").value||0)});$("opening-message").textContent="Saldo awal berhasil disimpan.";$("opening-message").className="import-message success";$("opening-debit").value="";$("opening-credit").value="";await loadOpeningBalances();}
+    catch(error){$("opening-message").textContent=error.message;$("opening-message").className="import-message error";}
+  });
+  document.querySelectorAll('[data-import-launch]').forEach(button=>button.addEventListener("click",()=>showImportTab(button.dataset.importLaunch==="nptrans"?"nptrans":"accounts")));
+  $("budget-filter-year").addEventListener("change",()=>{});
+  showImportTab("nptrans");
+  refreshNptransRows().catch(()=>{});
+  $("opening-period").value=new Date().toISOString().slice(0,7);
+  loadOpeningBalances().catch(()=>{});
+
   await refreshSummary();
 });
