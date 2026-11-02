@@ -72,6 +72,22 @@ function applySchemaMigrations() {
   db.run("INSERT OR IGNORE INTO app_meta(key,value) VALUES ('application_version','20.0.0')");
 }
 
+function createAutomaticBackup(force=false) {
+  if (!dbPath || !fs.existsSync(dbPath)) return {created:false};
+  const dir=path.join(path.dirname(dbPath),"backups");
+  fs.mkdirSync(dir,{recursive:true});
+  const today=new Date().toISOString().slice(0,10);
+  const target=path.join(dir,"SBP-Auto-"+today+".db");
+  if(!force&&fs.existsSync(target))return {created:false,path:target};
+  saveDb();
+  const temp=target+".tmp";
+  fs.copyFileSync(dbPath,temp);
+  fs.renameSync(temp,target);
+  const files=fs.readdirSync(dir).filter(x=>/^SBP-Auto-\\d{4}-\\d{2}-\\d{2}\\.db$/.test(x)).sort().reverse();
+  files.slice(30).forEach(name=>{try{fs.unlinkSync(path.join(dir,name));}catch(_){}});
+  return {created:true,path:target,retained:Math.min(files.length+1,30)};
+}
+
 async function initDatabase() {
   SQL = await initSqlJs({ locateFile: () => wasmPath() });
   const dataDir = path.join(app.getPath("userData"), "data");
@@ -85,6 +101,7 @@ async function initDatabase() {
   db.run("PRAGMA foreign_keys = ON");
   applySchemaMigrations();
   saveDb();
+  createAutomaticBackup(false);
 }
 
 ipcMain.handle("app:version", () => app.getVersion());
@@ -217,6 +234,7 @@ ipcMain.handle("journals:save", (_event, payload = {}) => {
     const old = rows("SELECT id,status,journal_date FROM journal_headers WHERE id=?", [id]);
     if (!old.length) throw new Error("Jurnal tidak ditemukan.");
     if (old[0].status !== "DRAFT") throw new Error("Jurnal POSTED tidak dapat diedit. Gunakan jurnal koreksi atau pembalik.");
+    if (periodIsClosed(old[0].journal_date)) throw new Error("Draft berada pada periode asal yang sudah ditutup.");
   }
   if (rows("SELECT id FROM journal_headers WHERE voucher_number=? AND id<>?", [voucher, id]).length) {
     throw new Error("Nomor bukti sudah digunakan.");
@@ -636,12 +654,14 @@ ipcMain.handle("reports:trial-balance",(_e,p={})=>{
 ipcMain.handle("reports:ledger",(_e,p={})=>{
  const sandi=String(p.sandi||"").trim(),from=String(p.date_from||"0000-01-01"),to=String(p.date_to||"9999-12-31");
  if(!sandi)throw new Error("Pilih SANDI akun.");
- const opening=rows("SELECT COALESCE(SUM(debit-credit),0) net FROM opening_balances WHERE sandi=? AND period_key<=?",[sandi,from.slice(0,7)])[0].net;
- const tx=rows(`SELECT h.journal_date,h.voucher_number,h.description journal_description,l.description line_description,l.debit,l.credit,h.id
+ if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal Buku Besar tidak valid.");
+ const opening=Number(rows("SELECT COALESCE(SUM(debit-credit),0) net FROM opening_balances WHERE sandi=? AND period_key<=?",[sandi,from.slice(0,7)])[0].net||0);
+ const before=Number(rows("SELECT COALESCE(SUM(l.debit-l.credit),0) net FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE l.sandi=? AND h.status='POSTED' AND h.journal_date<?",[sandi,from])[0].net||0);
+ const tx=rows(`SELECT h.journal_date,h.voucher_number,h.description journal_description,l.description line_description,l.debit,l.credit,h.id,l.line_no
  FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id
  WHERE l.sandi=? AND h.status='POSTED' AND h.journal_date BETWEEN ? AND ?
  ORDER BY h.journal_date,h.id,l.line_no`,[sandi,from,to]);
- let balance=Number(opening);return tx.map(x=>{balance+=Number(x.debit)-Number(x.credit);return {...x,running_balance:balance};});
+ let balance=opening+before;return tx.map(x=>{balance+=Number(x.debit)-Number(x.credit);return {...x,running_balance:balance};});
 });
 ipcMain.handle("reports:income-summary",(_e,p={})=>{
  const from=String(p.date_from||"0000-01-01"),to=String(p.date_to||"9999-12-31");
@@ -738,6 +758,7 @@ ipcMain.handle("db:restore",async()=>{
  try{db.close();fs.copyFileSync(choice.filePaths[0],dbPath);db=new SQL.Database(fs.readFileSync(dbPath));db.run("PRAGMA foreign_keys = ON");applySchemaMigrations();saveDb();return {ok:true,safetyBackup:safety};}
  catch(e){try{if(db)db.close();fs.copyFileSync(safety,dbPath);db=new SQL.Database(fs.readFileSync(dbPath));db.run("PRAGMA foreign_keys = ON");}catch(_){}throw new Error("Pemulihan gagal; database sebelum restore dipulihkan. "+e.message);}
 });
+ipcMain.handle("db:auto-backup", () => createAutomaticBackup(true));
 ipcMain.handle("db:backup", async () => {
   const choice = await dialog.showSaveDialog({
     title: "Simpan Backup SBP Accounting",
