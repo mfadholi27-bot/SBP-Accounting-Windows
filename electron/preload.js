@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld("sbpDesktop", {
   deleteAccount: (id) => ipcRenderer.invoke("accounts:delete", id),
   listJournals: (filters) => ipcRenderer.invoke("journals:list", filters || {}),
   saveJournal: (journal) => ipcRenderer.invoke("journals:save", journal),
-  deleteDraftJournal: (id) => ipcRenderer.invoke("journals:delete-draft", id)
+  deleteDraftJournal: (id) => ipcRenderer.invoke("journals:delete-draft", id),
+  listBudgets: (year) => ipcRenderer.invoke("budgets:list", year),
+  saveBudget: (payload) => ipcRenderer.invoke("budgets:save", payload),
+  deleteBudget: (payload) => ipcRenderer.invoke("budgets:delete", payload)
 });
