@@ -34,6 +34,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (name === "annual-budget") loadAnnualBudgets();
     if (name === "opening-balances") loadOpeningBalances();
     if (name === "import-center") refreshNptransRows();
+    if (["debit-notes","periods","ledger","reports","validation","journal-admin","print-settings","audit","archive","archive-reader","backup"].includes(name)) loadAdminModules();
   }
 
   navButtons.forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
@@ -434,7 +435,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       const result = await window.sbpDesktop.saveJournal(payload);
       setJournalMessage(status === "POSTED" ? "Jurnal berhasil diposting." : "Draft jurnal berhasil disimpan.");
       editingJournalId = 0;
-      await refreshSummary();
+      $("dn-date").value=new Date().toISOString().slice(0,10);
+  addDebitNoteLine();addDebitNoteLine();
+  $("period-key").value=new Date().toISOString().slice(0,7);
+  $("report-period").value=new Date().toISOString().slice(0,7);
+  $("admin-reversal-date").value=new Date().toISOString().slice(0,10);
+  $("archive-from").value=new Date().getFullYear()+"-01-01";
+  $("archive-to").value=new Date().toISOString().slice(0,10);
+  await loadAdminModules();
+  await refreshSummary();
       resetJournalForm();
       showView("journal-list");
       await loadJournalList();
