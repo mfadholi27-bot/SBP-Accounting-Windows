@@ -492,6 +492,158 @@ ipcMain.handle("opening:save", (_event, payload = {}) => {
   saveDb();return {ok:true};
 });
 
+
+function periodIsClosed(date){const key=String(date||"").slice(0,7);return rows("SELECT status FROM accounting_periods WHERE period_key=?",[key]).some(x=>x.status==="CLOSED");}
+function audit(action,type,id,summary,before=null,after=null){
+  db.run("INSERT INTO audit_logs(action,entity_type,entity_id,summary,before_json,after_json) VALUES(?,?,?,?,?,?)",
+    [action,type,String(id??""),summary,before?JSON.stringify(before):null,after?JSON.stringify(after):null]);
+}
+function totalsForLines(lines){return lines.reduce((a,x)=>({debit:a.debit+Number(x.debit||0),credit:a.credit+Number(x.credit||0)}),{debit:0,credit:0});}
+
+ipcMain.handle("debit-notes:list",(_e,filters={})=>{
+ const q="%"+String(filters.keyword||"").trim().toLowerCase()+"%";
+ return rows("SELECT * FROM debit_notes WHERE lower(note_number) LIKE ? OR lower(partner_name) LIKE ? OR lower(description) LIKE ? ORDER BY note_date DESC,id DESC",[q,q,q])
+ .map(n=>({...n,lines:rows("SELECT * FROM debit_note_lines WHERE debit_note_id=? ORDER BY line_no",[n.id])}));
+});
+ipcMain.handle("debit-notes:save",(_e,p={})=>{
+ const id=Number(p.id||0),number=String(p.note_number||"").trim(),date=String(p.note_date||""),partner=String(p.partner_name||"").trim(),description=String(p.description||"").trim();
+ const linesIn=Array.isArray(p.lines)?p.lines:[];
+ if(!number||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!partner||!description||linesIn.length<2)throw new Error("Nomor, tanggal, mitra, uraian, dan minimal dua baris wajib diisi.");
+ if(periodIsClosed(date))throw new Error("Periode nota debet sudah ditutup.");
+ const old=id?rows("SELECT * FROM debit_notes WHERE id=?",[id])[0]:null;
+ if(id&&(!old||old.status!=="DRAFT"))throw new Error("Nota yang sudah POSTED/CANCELLED tidak dapat diedit.");
+ if(rows("SELECT id FROM debit_notes WHERE note_number=? AND id<>?",[number,id]).length)throw new Error("Nomor nota sudah digunakan.");
+ const clean=linesIn.map((x,i)=>{const sandi=String(x.sandi||"").trim(),d=Number(x.debit||0),cr=Number(x.credit||0),a=rows("SELECT id FROM accounts WHERE sandi=? AND is_active=1",[sandi])[0];if(!a||d<0||cr<0||!Number.isFinite(d)||!Number.isFinite(cr)||(d>0&&cr>0))throw new Error("Baris "+(i+1)+" tidak valid.");return {...x,sandi,account_id:a.id,debit:d,credit:cr};});
+ const t=totalsForLines(clean);if(Math.abs(t.debit-t.credit)>0.005||t.debit<=0)throw new Error("Nota debet harus seimbang dan bernilai lebih dari nol.");
+ db.run("BEGIN IMMEDIATE");try{
+  let noteId=id;
+  if(id){db.run("UPDATE debit_notes SET note_number=?,note_date=?,note_type=?,partner_name=?,invoice_reference=?,description=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",[number,date,String(p.note_type||""),partner,String(p.invoice_reference||""),description,id]);db.run("DELETE FROM debit_note_lines WHERE debit_note_id=?",[id]);}
+  else{db.run("INSERT INTO debit_notes(note_number,note_date,note_type,partner_name,invoice_reference,description,status) VALUES(?,?,?,?,?,?,'DRAFT')",[number,date,String(p.note_type||""),partner,String(p.invoice_reference||""),description]);noteId=db.exec("SELECT last_insert_rowid()")[0].values[0][0];}
+  const st=db.prepare("INSERT INTO debit_note_lines(debit_note_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+  try{clean.forEach((x,i)=>st.run([noteId,i+1,x.account_id,x.sandi,String(x.description||""),x.debit,x.credit]));}finally{st.free();}
+  audit(id?"UPDATE_DEBIT_NOTE":"CREATE_DEBIT_NOTE","DEBIT_NOTE",noteId,"Nota debet "+number);
+  db.run("COMMIT");saveDb();return {ok:true,id:noteId};
+ }catch(e){db.run("ROLLBACK");throw e;}
+});
+ipcMain.handle("debit-notes:post",(_e,idValue)=>{
+ const id=Number(idValue),n=rows("SELECT * FROM debit_notes WHERE id=?",[id])[0];if(!n||n.status!=="DRAFT")throw new Error("Nota tidak ditemukan atau bukan Draft.");
+ if(periodIsClosed(n.note_date))throw new Error("Periode sudah ditutup.");
+ const lines=rows("SELECT * FROM debit_note_lines WHERE debit_note_id=? ORDER BY line_no",[id]);const t=totalsForLines(lines);
+ if(lines.length<2||Math.abs(t.debit-t.credit)>0.005||t.debit<=0)throw new Error("Nota tidak seimbang.");
+ db.run("BEGIN IMMEDIATE");try{
+  db.run("INSERT INTO journal_headers(journal_date,voucher_number,description,status,source_type,source_id) VALUES(?,?,?,'POSTED','DEBIT_NOTE',?)",[n.note_date,n.note_number,"Nota Debet "+n.partner_name+" · "+n.description,String(id)]);
+  const jid=db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+  const st=db.prepare("INSERT INTO journal_lines(journal_id,line_no,account_id,sandi,description,debit,credit) VALUES(?,?,?,?,?,?,?)");
+  try{lines.forEach(x=>st.run([jid,x.line_no,x.account_id,x.sandi,x.description,x.debit,x.credit]));}finally{st.free();}
+  db.run("UPDATE journal_headers SET posted_at=CURRENT_TIMESTAMP WHERE id=?",[jid]);
+  db.run("UPDATE debit_notes SET status='POSTED',linked_journal_id=?,posted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",[jid,id]);
+  audit("POST_DEBIT_NOTE","DEBIT_NOTE",id,"Nota "+n.note_number+" diposting ke jurnal "+jid);
+  db.run("COMMIT");saveDb();return {ok:true,journal_id:jid};
+ }catch(e){db.run("ROLLBACK");throw e;}
+});
+ipcMain.handle("debit-notes:cancel",(_e,p={})=>{
+ const id=Number(p.id),reason=String(p.reason||"").trim(),n=rows("SELECT * FROM debit_notes WHERE id=?",[id])[0];if(!n||n.status==="CANCELLED"||!reason)throw new Error("Nota tidak valid atau alasan pembatalan kosong.");
+ if(periodIsClosed(n.note_date))throw new Error("Periode sudah ditutup.");
+ db.run("UPDATE debit_notes SET status='CANCELLED',cancelled_at=CURRENT_TIMESTAMP,cancel_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",[reason,id]);audit("CANCEL_DEBIT_NOTE","DEBIT_NOTE",id,"Nota dibatalkan: "+reason);saveDb();return {ok:true};
+});
+
+ipcMain.handle("periods:list",()=>rows("SELECT * FROM accounting_periods ORDER BY period_key DESC"));
+ipcMain.handle("periods:open",(_e,p={})=>{
+ const key=String(p.period_key||"");if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(key))throw new Error("Periode harus YYYY-MM.");
+ db.run("INSERT INTO accounting_periods(period_key,status,is_active,opened_at) VALUES(?,'OPEN',1,CURRENT_TIMESTAMP) ON CONFLICT(period_key) DO UPDATE SET status=CASE WHEN status='CLOSED' THEN status ELSE 'OPEN' END,is_active=1,opened_at=COALESCE(opened_at,CURRENT_TIMESTAMP)");
+ db.run("UPDATE accounting_periods SET is_active=0 WHERE period_key<>?",[key]);audit("OPEN_PERIOD","PERIOD",key,"Periode "+key+" dibuka");saveDb();return {ok:true};
+});
+ipcMain.handle("periods:close",(_e,p={})=>{
+ const key=String(p.period_key||""),note=String(p.note||"").trim();if(!/^\\d{4}-(0[1-9]|1[0-2])$/.test(key))throw new Error("Periode tidak valid.");
+ const drafts=rows("SELECT COUNT(*) total FROM journal_headers WHERE substr(journal_date,1,7)=? AND status='DRAFT'",[key])[0].total;
+ if(drafts)throw new Error("Tidak dapat menutup periode: masih ada "+drafts+" jurnal Draft.");
+ const tb=rows(`SELECT COALESCE(SUM(o.debit-o.credit),0) opening,
+ COALESCE(SUM(j.debit),0) debit,COALESCE(SUM(j.credit),0) credit
+ FROM accounts a LEFT JOIN opening_balances o ON o.sandi=a.sandi AND o.period_key=?
+ LEFT JOIN (SELECT l.sandi,SUM(l.debit) debit,SUM(l.credit) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE substr(h.journal_date,1,7)=? AND h.status='POSTED' GROUP BY l.sandi) j ON j.sandi=a.sandi`,[key,key]);
+ const sum=rows(`SELECT COALESCE(SUM(debit),0) debit,COALESCE(SUM(credit),0) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE substr(h.journal_date,1,7)=? AND h.status='POSTED'`,[key])[0];
+ if(Math.abs(Number(sum.debit)-Number(sum.credit))>0.005)throw new Error("Mutasi jurnal tidak seimbang. Periode tidak dapat ditutup.");
+ const snap={period:key,postedJournalCount:Number(rows("SELECT COUNT(*) total FROM journal_headers WHERE substr(journal_date,1,7)=? AND status='POSTED'",[key])[0].total),debit:Number(sum.debit),credit:Number(sum.credit),closedAt:new Date().toISOString()};
+ db.run("INSERT INTO accounting_periods(period_key,status,is_active,closed_at,closed_by,close_note,close_snapshot_json) VALUES(?,'CLOSED',0,CURRENT_TIMESTAMP,'LOCAL_USER',?,?) ON CONFLICT(period_key) DO UPDATE SET status='CLOSED',is_active=0,closed_at=CURRENT_TIMESTAMP,closed_by='LOCAL_USER',close_note=excluded.close_note,close_snapshot_json=excluded.close_snapshot_json",[key,note,JSON.stringify(snap)]);
+ audit("CLOSE_PERIOD","PERIOD",key,"Periode "+key+" ditutup",null,snap);saveDb();return {ok:true,snapshot:snap};
+});
+ipcMain.handle("periods:reopen",(_e,p={})=>{
+ const key=String(p.period_key||""),reason=String(p.reason||"").trim();if(!reason)throw new Error("Alasan buka kembali wajib diisi.");
+ const old=rows("SELECT * FROM accounting_periods WHERE period_key=?",[key])[0];if(!old||old.status!=="CLOSED")throw new Error("Periode bukan periode tertutup.");
+ db.run("UPDATE accounting_periods SET status='OPEN',opened_at=CURRENT_TIMESTAMP,close_note=? WHERE period_key=?",[reason,key]);audit("REOPEN_PERIOD","PERIOD",key,"Periode dibuka kembali: "+reason,old);saveDb();return {ok:true};
+});
+
+ipcMain.handle("reports:trial-balance",(_e,p={})=>{
+ const period=String(p.period_key||"");if(!/^\\d{4}-\\d{2}$/.test(period))throw new Error("Pilih periode YYYY-MM.");
+ return rows(`SELECT a.sandi,a.account_name,a.normal_balance,
+ COALESCE(o.debit,0) opening_debit,COALESCE(o.credit,0) opening_credit,
+ COALESCE(m.debit,0) movement_debit,COALESCE(m.credit,0) movement_credit,
+ COALESCE(o.debit,0)+COALESCE(m.debit,0) debit_total,
+ COALESCE(o.credit,0)+COALESCE(m.credit,0) credit_total,
+ (COALESCE(o.debit,0)-COALESCE(o.credit,0)+COALESCE(m.debit,0)-COALESCE(m.credit,0)) net_balance
+ FROM accounts a
+ LEFT JOIN (SELECT sandi,SUM(debit) debit,SUM(credit) credit FROM opening_balances WHERE period_key=? GROUP BY sandi) o ON o.sandi=a.sandi
+ LEFT JOIN (SELECT l.sandi,SUM(l.debit) debit,SUM(l.credit) credit FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id WHERE substr(h.journal_date,1,7)=? AND h.status='POSTED' GROUP BY l.sandi) m ON m.sandi=a.sandi
+ WHERE a.is_active=1 AND (o.sandi IS NOT NULL OR m.sandi IS NOT NULL)
+ ORDER BY a.sandi`,[period,period]);
+});
+ipcMain.handle("reports:ledger",(_e,p={})=>{
+ const sandi=String(p.sandi||"").trim(),from=String(p.date_from||"0000-01-01"),to=String(p.date_to||"9999-12-31");
+ if(!sandi)throw new Error("Pilih SANDI akun.");
+ const opening=rows("SELECT COALESCE(SUM(debit-credit),0) net FROM opening_balances WHERE sandi=? AND period_key<=?",[sandi,from.slice(0,7)])[0].net;
+ const tx=rows(`SELECT h.journal_date,h.voucher_number,h.description journal_description,l.description line_description,l.debit,l.credit,h.id
+ FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id
+ WHERE l.sandi=? AND h.status='POSTED' AND h.journal_date BETWEEN ? AND ?
+ ORDER BY h.journal_date,h.id,l.line_no`,[sandi,from,to]);
+ let balance=Number(opening);return tx.map(x=>{balance+=Number(x.debit)-Number(x.credit);return {...x,running_balance:balance};});
+});
+ipcMain.handle("reports:income-summary",(_e,p={})=>{
+ const from=String(p.date_from||"0000-01-01"),to=String(p.date_to||"9999-12-31");
+ return rows(`SELECT a.sandi,a.account_name,a.account_type,a.normal_balance,SUM(l.debit) debit,SUM(l.credit) credit
+ FROM journal_lines l JOIN journal_headers h ON h.id=l.journal_id JOIN accounts a ON a.sandi=l.sandi
+ WHERE h.status='POSTED' AND h.journal_date BETWEEN ? AND ? GROUP BY a.sandi,a.account_name,a.account_type,a.normal_balance ORDER BY a.sandi`,[from,to]);
+});
+ipcMain.handle("validation:run",()=>{
+ const issues=[];
+ rows("SELECT voucher_number,COUNT(*) n FROM journal_headers GROUP BY voucher_number HAVING COUNT(*)>1").forEach(x=>issues.push({severity:"ERROR",code:"DUPLICATE_VOUCHER",detail:"Nomor bukti "+x.voucher_number+" terduplikasi ("+x.n+")."}));
+ rows("SELECT h.id,h.voucher_number,SUM(l.debit) debit,SUM(l.credit) credit FROM journal_headers h JOIN journal_lines l ON l.journal_id=h.id WHERE h.status='POSTED' GROUP BY h.id HAVING ABS(SUM(l.debit)-SUM(l.credit))>0.005").forEach(x=>issues.push({severity:"ERROR",code:"UNBALANCED_POSTED",detail:"Jurnal "+x.voucher_number+" tidak seimbang."}));
+ rows("SELECT l.sandi,COUNT(*) n FROM journal_lines l LEFT JOIN accounts a ON a.sandi=l.sandi WHERE a.id IS NULL GROUP BY l.sandi").forEach(x=>issues.push({severity:"WARNING",code:"MISSING_ACCOUNT",detail:"SANDI "+x.sandi+" tidak ditemukan di Master Akun ("+x.n+" baris)."}));
+ rows("SELECT h.id,h.voucher_number FROM journal_headers h WHERE h.status='DRAFT' AND substr(h.journal_date,1,7) IN (SELECT period_key FROM accounting_periods WHERE status='CLOSED')").forEach(x=>issues.push({severity:"ERROR",code:"DRAFT_IN_CLOSED_PERIOD",detail:"Draft "+x.voucher_number+" berada di periode tertutup."}));
+ audit("RUN_VALIDATION","SYSTEM","", "Validasi dijalankan: "+issues.length+" temuan.");saveDb();return issues;
+});
+ipcMain.handle("audit:list",(_e,p={})=>{
+ const limit=Math.min(1000,Math.max(1,Number(p.limit||300)));
+ return rows("SELECT * FROM audit_logs ORDER BY id DESC LIMIT "+limit);
+});
+ipcMain.handle("print-settings:get",()=>rows("SELECT setting_key,setting_value FROM print_settings ORDER BY setting_key"));
+ipcMain.handle("print-settings:save",(_e,p={})=>{
+ const entries=Object.entries(p);db.run("BEGIN IMMEDIATE");try{const st=db.prepare("INSERT INTO print_settings(setting_key,setting_value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=CURRENT_TIMESTAMP");try{entries.forEach(([k,v])=>st.run([k,String(v)]));}finally{st.free();}audit("SAVE_PRINT_SETTINGS","PRINT","", "Pengaturan cetak diperbarui.");db.run("COMMIT");}catch(e){db.run("ROLLBACK");throw e;}saveDb();return {ok:true};
+});
+ipcMain.handle("archive:create",(_e,p={})=>{
+ const from=String(p.date_from||""),to=String(p.date_to||"");if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(from)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(to)||from>to)throw new Error("Rentang tanggal arsip tidak valid.");
+ const data={version:1,createdAt:new Date().toISOString(),dateFrom:from,dateTo:to,accounts:rows("SELECT * FROM accounts"),journals:rows("SELECT * FROM journal_headers WHERE journal_date BETWEEN ? AND ?",[from,to]).map(h=>({...h,lines:rows("SELECT * FROM journal_lines WHERE journal_id=?",[h.id])})),openingBalances:rows("SELECT * FROM opening_balances WHERE period_key BETWEEN ? AND ?",[from.slice(0,7),to.slice(0,7)]),budgets:rows("SELECT * FROM annual_budgets WHERE fiscal_year BETWEEN ? AND ?",[Number(from.slice(0,4)),Number(to.slice(0,4))]),debitNotes:rows("SELECT * FROM debit_notes WHERE note_date BETWEEN ? AND ?",[from,to]),audit:rows("SELECT * FROM audit_logs WHERE substr(occurred_at,1,10) BETWEEN ? AND ?",[from,to])};
+ const choice=dialog.showSaveDialogSync({title:"Simpan Arsip SBP Accounting",defaultPath:"SBP-Archive-"+from+"-"+to+".json",filters:[{name:"SBP Archive",extensions:["json"]}]});if(!choice)return {canceled:true};
+ fs.writeFileSync(choice,JSON.stringify(data,null,2),"utf8");const count=data.journals.length;
+ db.run("INSERT INTO archive_records(archive_name,period_start,period_end,file_path,record_count,metadata_json) VALUES(?,?,?,?,?,?)",["SBP Archive "+from+"-"+to,from,to,choice,count,JSON.stringify({journals:count,accounts:data.accounts.length})]);
+ audit("CREATE_ARCHIVE","ARCHIVE",choice,"Arsip "+from+" s.d. "+to+" dibuat.");saveDb();return {ok:true,path:choice,recordCount:count};
+});
+ipcMain.handle("archive:list",()=>rows("SELECT * FROM archive_records ORDER BY created_at DESC"));
+ipcMain.handle("archive:read",async(_e,p={})=>{
+ const choice=await dialog.showOpenDialog({title:"Buka Arsip SBP Accounting",properties:["openFile"],filters:[{name:"SBP Archive",extensions:["json"]}]});
+ if(choice.canceled||!choice.filePaths[0])return {canceled:true};
+ const data=JSON.parse(fs.readFileSync(choice.filePaths[0],"utf8"));if(data.version!==1||!Array.isArray(data.journals))throw new Error("Format arsip tidak dikenali.");
+ return {ok:true,metadata:{createdAt:data.createdAt,dateFrom:data.dateFrom,dateTo:data.dateTo,journalCount:data.journals.length,accountCount:(data.accounts||[]).length},data};
+});
+ipcMain.handle("db:restore",async()=>{
+ const choice=await dialog.showOpenDialog({title:"Pilih Backup Database untuk Dipulihkan",properties:["openFile"],filters:[{name:"SQLite Database",extensions:["db"]}]});
+ if(choice.canceled||!choice.filePaths[0])return {canceled:true};
+ const bytes=fs.readFileSync(choice.filePaths[0]);let test;
+ try{test=new SQL.Database(bytes);test.run("PRAGMA integrity_check");const check=test.exec("PRAGMA integrity_check");if(!check.length||check[0].values[0][0]!=="ok")throw new Error("Pemeriksaan integritas SQLite gagal.");const tables=test.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='journal_headers'");if(!tables.length)throw new Error("File bukan database SBP Accounting.");}
+ catch(e){if(test)test.close();throw new Error("Backup tidak valid: "+e.message);}
+ const safety=path.join(path.dirname(dbPath),"before-restore-"+Date.now()+".db");saveDb();fs.copyFileSync(dbPath,safety);
+ try{db.close();fs.copyFileSync(choice.filePaths[0],dbPath);db=new SQL.Database(fs.readFileSync(dbPath));db.run("PRAGMA foreign_keys = ON");applySchemaMigrations();saveDb();return {ok:true,safetyBackup:safety};}
+ catch(e){try{if(db)db.close();fs.copyFileSync(safety,dbPath);db=new SQL.Database(fs.readFileSync(dbPath));db.run("PRAGMA foreign_keys = ON");}catch(_){}throw new Error("Pemulihan gagal; database sebelum restore dipulihkan. "+e.message);}
+});
 ipcMain.handle("db:backup", async () => {
   const choice = await dialog.showSaveDialog({
     title: "Simpan Backup SBP Accounting",
